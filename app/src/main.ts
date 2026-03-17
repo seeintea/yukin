@@ -1,6 +1,10 @@
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
+import { fileURLToPath } from 'url'
 import { spawn, ChildProcess } from 'child_process'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 let mainWindow: BrowserWindow | null = null
 let goProcess: ChildProcess | null = null
@@ -44,7 +48,7 @@ function createWindow(): void {
     width: 1200,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
