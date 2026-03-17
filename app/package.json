@@ -1,0 +1,38 @@
+{
+  "name": "yukin",
+  "version": "0.0.1",
+  "description": "Electron + Go Local AI Agent",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "vite": "^5.2.0"
+  },
+  "build": {
+    "appId": "com.yukin.app",
+    "productName": "yukin",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "extraResources": [
+      {
+        "from": "resources/bin/agent",
+        "to": "bin/agent"
+      }
+    ],
+    "files": [
+      "src/**/*",
+      "dist/**/*"
+    ]
+  }
+}
