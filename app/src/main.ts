@@ -1,14 +1,14 @@
-const { app, BrowserWindow } = require('electron')
-const path = require('path')
-const { spawn } = require('child_process')
+import { app, BrowserWindow } from 'electron'
+import path from 'path'
+import { spawn, ChildProcess } from 'child_process'
 
-let mainWindow
-let goProcess
+let mainWindow: BrowserWindow | null = null
+let goProcess: ChildProcess | null = null
 
 // 启动 Go 后端
-function startGoBackend() {
+function startGoBackend(): void {
   const isDev = process.env.NODE_ENV === 'development'
-  let goBinaryPath
+  let goBinaryPath: string
 
   if (isDev) {
     // 开发环境：使用项目目录下的二进制
@@ -26,20 +26,20 @@ function startGoBackend() {
     })
   }
 
-  goProcess.on('error', (err) => {
+  goProcess.on('error', (err: Error) => {
     console.error('Failed to start Go backend:', err)
   })
 }
 
 // 停止 Go 后端
-function stopGoBackend() {
+function stopGoBackend(): void {
   if (goProcess) {
     goProcess.kill()
     goProcess = null
   }
 }
 
-function createWindow() {
+function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
