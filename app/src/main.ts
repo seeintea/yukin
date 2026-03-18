@@ -1,7 +1,7 @@
-import { app, BrowserWindow } from 'electron'
-import path from 'path'
-import { fileURLToPath } from 'url'
-import { spawn, ChildProcess } from 'child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { BrowserWindow, app } from 'electron'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -20,13 +20,13 @@ function startGoBackend(): void {
     // 开发时直接 go run，不编译
     goProcess = spawn('go', ['run', goBinaryPath], {
       cwd: path.join(__dirname, '../../backend'),
-      stdio: 'inherit'
+      stdio: 'inherit',
     })
   } else {
     // 生产环境：使用打包后的二进制
     goBinaryPath = path.join(process.resourcesPath, 'bin/agent')
     goProcess = spawn(goBinaryPath, [], {
-      stdio: 'inherit'
+      stdio: 'inherit',
     })
   }
 
@@ -50,8 +50,8 @@ function createWindow(): void {
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
-    }
+      nodeIntegration: false,
+    },
   })
 
   const isDev = process.env.NODE_ENV === 'development'

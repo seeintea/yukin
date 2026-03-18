@@ -1,4 +1,4 @@
-# Yukin
+# yukin
 
 > Electron + Go 本地 AI Agent 桌面应用
 
@@ -17,10 +17,10 @@ make init
 
 # 2. 启动开发环境（需要两个终端）
 # 终端 1: 启动 Go 后端
-make dev-backend
+make dev-server
 
 # 终端 2: 启动 Electron 前端
-make dev-frontend
+make dev-app
 ```
 
 ## 目录结构
