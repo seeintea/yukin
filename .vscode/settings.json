@@ -3,6 +3,7 @@
     "cdylib",
     "rlib",
     "serde",
+    "shiki",
     "staticlib",
     "tauri",
     "yukin"

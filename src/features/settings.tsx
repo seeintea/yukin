@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 
-export function SettingsPage() {
+export function SettingsScreen() {
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
       <header>

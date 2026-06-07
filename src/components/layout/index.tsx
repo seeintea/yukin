@@ -1,13 +1,13 @@
 import { Link, useLocation } from "react-router";
 import { MessageSquare, Settings as SettingsIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/tailwind";
 import { Separator } from "@/components/ui/separator";
 
-interface AppShellProps {
+interface LayoutProps {
   children: React.ReactNode;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const isSettings = location.pathname.startsWith("/settings");
   const isChat = !isSettings;

@@ -1,6 +1,6 @@
 import { useParams } from "react-router";
 
-export function ChatPage() {
+export function ChatScreen() {
   const { sessionId } = useParams<{ sessionId: string }>();
 
   return (
