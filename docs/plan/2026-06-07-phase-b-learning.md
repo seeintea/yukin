@@ -48,8 +48,9 @@
 
 ### B2 — `error.rs`:`AppError` + `?` + `From` trait(**学习重头戏 1**)
 
-- 状态: `[ ]`
+- 状态: `[~]`
 - 完成日期: ——
+- **概念课文档**:[learning-notes/B2-error-handling.md](./learning-notes/B2-error-handling.md) — 任务、自检、易错点都在里面
 - 目标:`src-tauri/src/error.rs` 落地 `AppError` 全部变体 + 手写 `impl Serialize` 让前端拿 `{code, message}`;在临时 `_test` 函数里验证 `?` 能自动转换 `io::Error`。
 - 教学点:
   - `#[derive(thiserror::Error)]` 宏展开后等价于什么(对照手写 `impl std::error::Error + Display`)
