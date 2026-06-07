@@ -11,11 +11,10 @@
 接手时请先做这 3 件事:
 
 1. **读两份文档**:
+
    - 本文件:**你正在落地的内容、节奏、当前进度**
    - 同目录 `2026-06-06-phase-b-rust-foundation.md`:**Phase B 的架构定义与最终交付物**(本文件不重复列依赖、文件、CSP 等内容,需要时回去看)
-
 2. **核对进度**:扫下面"子步骤进度"的 checkbox,找到第一个未打钩的步骤即下一步入口。看那一步的"如有疑问/卡点"小节,确认是否已经被解决。
-
 3. **遵守教学契约**(下一节)。如果用户没改变意图,**不要主动用 Edit/Write 写 Rust 代码到 `src-tauri/`**,除非用户明说"这段你来写"或要求 review 时改某行。
 
 ---
@@ -41,7 +40,7 @@
 
 ### B1 — Cargo 依赖 + 第一次 `cargo check`(机械步,热身)
 
-- 状态: `[ ]`
+- 状态: `[x]`
 - 完成日期: ——
 - 目标:`src-tauri/Cargo.toml` 按 phase-b doc 第 1 节追加 19 个依赖;`cd src-tauri && cargo check` 通过。
 - 教学点:Cargo features 语义、`default-features = false`、为什么 `reqwest` 选 `rustls-tls` 而不是 `native-tls`、`tokio` 的 `features = ["full"]` 实际开了什么。
