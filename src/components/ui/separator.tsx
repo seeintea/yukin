@@ -2,7 +2,7 @@
 
 import { Separator as SeparatorPrimitive } from "@base-ui/react/separator"
 
-import { cn } from "@/utils/tailwind"
+import { cn } from "#/utils/tailwind"
 
 function Separator({
   className,

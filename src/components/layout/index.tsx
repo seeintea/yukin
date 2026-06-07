@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router";
 import { MessageSquare, Settings as SettingsIcon } from "lucide-react";
-import { cn } from "@/utils/tailwind";
-import { Separator } from "@/components/ui/separator";
+import { cn } from "#/utils/tailwind";
+import { Separator } from "#/components/ui/separator";
 
 interface LayoutProps {
   children: React.ReactNode;

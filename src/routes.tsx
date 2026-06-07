@@ -1,8 +1,8 @@
 import { MemoryRouter, Navigate, Route, Routes as ReactRoutes } from "react-router";
-import { Layout } from "@/components/layout";
-import { ChatScreen } from "@/features/chat";
-import { SettingsScreen } from "@/features/settings";
-import { Toaster } from "@/components/ui/sonner";
+import { Layout } from "#/components/layout";
+import { ChatScreen } from "#/features/chat";
+import { SettingsScreen } from "#/features/settings";
+import { Toaster } from "#/components/ui/sonner";
 
 export function Routes() {
   return (
