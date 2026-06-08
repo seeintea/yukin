@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::Tool;
 use crate::{AppError, AppResult};
 use async_trait::async_trait;

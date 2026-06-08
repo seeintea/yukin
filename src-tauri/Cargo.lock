@@ -6413,14 +6413,12 @@ dependencies = [
 name = "yukin"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "eventsource-stream",
  "futures",
  "glob",
  "keyring",
- "once_cell",
  "path-clean",
  "reqwest 0.12.28",
  "schemars 0.8.22",
