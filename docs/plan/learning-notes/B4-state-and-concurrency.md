@@ -229,6 +229,8 @@ tokio::spawn(async move { s2.write().await.push(2); });
 
 B4 阶段我们写 struct 定义,不 spawn task,不需要 Arc。后面 Phase G(agent loop)会用上。
 
+> 📖 想系统看这一组类型(`Box` / `Rc` / `Arc` / `RefCell` / `Cell` / `Mutex` / `RwLock`)的区别和选择决策树,看 [补充 — Rust 智能指针速查表](./supplementary-smart-pointers.md)。
+
 ---
 
 ## 6. 两个常见 pattern
