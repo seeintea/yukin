@@ -1,4 +1,5 @@
 import { Button } from "#/components/ui/button";
+const { invoke } = await import("@tauri-apps/api/core");
 
 export function SettingsScreen() {
   return (
@@ -12,9 +13,19 @@ export function SettingsScreen() {
       <section className="space-y-2 rounded-lg border border-border p-4">
         <h3 className="font-medium">Placeholder</h3>
         <p className="text-sm text-muted-foreground">
-          Workspace selector, API key form, and provider picker will live here (Phase D + E).
+          Workspace selector, API key form, and provider picker will live here
+          (Phase D + E).
         </p>
-        <Button size="sm" variant="secondary">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={async () => {
+            console.log("test---------");
+            await invoke("get_workspace").catch((error) => {
+              console.log(error)
+            });
+          }}
+        >
           Coming soon
         </Button>
       </section>

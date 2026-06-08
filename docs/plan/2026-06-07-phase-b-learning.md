@@ -114,14 +114,19 @@
 
 ### B6 — 配置收尾:capabilities + CSP
 
-- 状态: `[ ]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-08
+- **概念课文档**:[learning-notes/B6-capabilities-and-csp.md](./learning-notes/B6-capabilities-and-csp.md)
 - 目标:`src-tauri/capabilities/default.json` 加 `dialog:allow-open`;`src-tauri/tauri.conf.json` `security.csp` 从 `null` 改为 phase-b doc 第 8 节的锁死 CSP;devtools Console 无 CSP 违规;`await __TAURI__.core.invoke('get_workspace')` 返回 `{code:"other", message:"todo"}`。
 - 教学点:
   - Tauri v1 `allowlist` → v2 capability 系统的演进
   - CSP 各 directive 含义;`ipc: https://ipc.localhost` 是 Tauri 的特殊 origin
   - 为什么**不**需要 `connect-src https://api.anthropic.com`:架构核心决策,前端不直接调外网
 - 指路:[Tauri — Capabilities](https://tauri.app/security/capabilities/)、[MDN — CSP directives](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy)。
+- **实际收获 / 踩坑**:
+  - **三条验证全过**:invoke(`get_workspace`) 返回 todo 错误对象 + `fetch('https://google.com')` 被 CSP 红字拦截 + Network 面板能看到 CSP header
+  - **架构兑现**:`connect-src` 里只有 `'self' ipc: https://ipc.localhost`,没有任何 LLM provider host —— XSS 偷不到 key,加 provider 也不需动 CSP
+  - **改 tauri.conf.json 必须重启 cargo**(前端 HMR 不够),否则 CSP 不更新
 
 ---
 
@@ -129,10 +134,10 @@
 
 与 phase-b 原文档"验证"一致:
 
-- [ ] `cd src-tauri && cargo check` 通过(B1 起每步都要保持通过)
-- [ ] `pnpm tauri dev` 启动成功(B5 后)
-- [ ] devtools: `await __TAURI__.core.invoke('get_workspace')` 返回 `{code:"other", message:"todo"}`
-- [ ] devtools Network 看 CSP header,无 `api.anthropic.com` 字样
+- [x] `cd src-tauri && cargo check` 通过(B1 起每步都要保持通过)
+- [x] `pnpm tauri dev` 启动成功(B5 后)
+- [x] devtools: `await __TAURI__.core.invoke('get_workspace')` 返回 `{code:"other", message:"todo"}`
+- [x] devtools Network 看 CSP header,无 `api.anthropic.com` 字样
 
 ---
 
