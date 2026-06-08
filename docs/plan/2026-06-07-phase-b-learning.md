@@ -94,8 +94,9 @@
 
 ### B5 — `lib.rs`:Tauri setup hook + `tracing` + plugin 注册(**学习重头戏 3 · async/Tauri 接缝**)
 
-- 状态: `[ ]`
+- 状态: `[~]`
 - 完成日期: ——
+- **概念课文档**:[learning-notes/B5-tauri-setup-and-tracing.md](./learning-notes/B5-tauri-setup-and-tracing.md) — 任务、自检、决策记录都在里面
 - 目标:`src-tauri/src/lib.rs` 删 `greet`;初始化 `tracing_subscriber`;注册 `opener` + `dialog` + `sql` 三个 plugin;setup hook 用 `tauri::async_runtime::block_on` 调 `AppState::new` 后 `app.manage`;`generate_handler![...]` 列出 B3 全部 todo 命令;`pnpm tauri dev` 启动主窗口不崩。
 - 教学点:
   - `tracing_subscriber::fmt().with_env_filter(...).init()`:`RUST_LOG=yukin=debug` 怎么生效
