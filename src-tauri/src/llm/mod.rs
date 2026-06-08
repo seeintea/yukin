@@ -1,3 +1,7 @@
+// TODO(Phase F): expand ChatMessage to Vec<ContentBlock> and LlmEvent
+// to streaming variants (TextDelta, ToolCallStart/InputDelta/End, MessageStop).
+// Current types are skeleton placeholders.
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +26,6 @@ pub enum LlmEvent {
 }
 
 #[async_trait]
-pub  trait LlmProvider: Send + Sync {
+pub trait LlmProvider: Send + Sync {
     async fn chat(&self, message: Vec<ChatMessage>) -> AppResult<()>;
 }

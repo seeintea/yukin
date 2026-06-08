@@ -1,7 +1,7 @@
-pub mod fs_tools;
-pub mod http_tools;
-pub mod memory_tools;
-pub mod shell_tools;
+pub mod fs_tool;
+pub mod http_tool;
+pub mod memory_tool;
+pub mod shell_tool;
 
 use crate::AppResult;
 use async_trait::async_trait;
@@ -23,5 +23,9 @@ impl ToolRegistry {
         Self {
             tools: HashMap::new(),
         }
+    }
+
+    pub fn register(&mut self, tool: Arc<dyn Tool>) {
+        self.tools.insert(tool.name().to_string(), tool);
     }
 }

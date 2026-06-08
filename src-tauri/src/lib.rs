@@ -33,6 +33,15 @@ pub fn run() {
             let state =
                 tauri::async_runtime::block_on(async move { AppState::new(&handle).await })?;
             app.manage(state);
+
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
+            }
+
             tracing::info!("yukin setup complete");
             Ok(())
         })

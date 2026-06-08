@@ -1,8 +1,7 @@
 use crate::{AppError, AppResult};
 
 #[tauri::command]
-pub async fn session_create(title: String) -> AppResult<String> {
-    let _ = title;
+pub async fn session_create(_title: String) -> AppResult<String> {
     Err(AppError::Other("todo".into()))
 }
 
@@ -12,29 +11,25 @@ pub async fn session_list() -> AppResult<Vec<String>> {
 }
 
 #[tauri::command]
-pub async fn session_update(id: String, title: Option<String>) -> AppResult<()> {
-    let _ = (id, title);
+pub async fn session_update(_id: String, _title: Option<String>) -> AppResult<()> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn session_delete(id: String) -> AppResult<()> {
-    let _ = id;
+pub async fn session_delete(_id: String) -> AppResult<()> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
 pub async fn session_append_message(
-    session_id: String,
-    role: String,
-    content: String,
+    _session_id: String,
+    _role: String,
+    _content: String,
 ) -> AppResult<String> {
-    let _ = (session_id, role, content);
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn session_load_messages(session_id: String) -> AppResult<Vec<String>> {
-    let _ = session_id;
+pub async fn session_load_messages(_session_id: String) -> AppResult<Vec<String>> {
     Err(AppError::Other("todo".into()))
 }

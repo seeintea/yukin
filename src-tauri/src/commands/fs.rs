@@ -1,42 +1,36 @@
 use crate::{AppError, AppResult};
 
 #[tauri::command]
-pub async fn fs_read(path: String) -> AppResult<String> {
-    let _ = path;
+pub async fn fs_read(_path: String) -> AppResult<String> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn fs_write(path: String, content: String, create_dirs: Option<bool>) -> AppResult<()> {
-    let _ = (path, content, create_dirs);
+pub async fn fs_write(_path: String, _content: String, _create_dirs: Option<bool>) -> AppResult<()> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
 pub async fn fs_edit(
-    path: String,
-    search: String,
-    replace: String,
-    all: Option<bool>,
+    _path: String,
+    _search: String,
+    _replace: String,
+    _all: Option<bool>,
 ) -> AppResult<()> {
-    let _ = (path, search, replace, all);
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn fs_list_dir(path: String) -> AppResult<Vec<String>> {
-    let _ = path;
+pub async fn fs_list_dir(_path: String) -> AppResult<Vec<String>> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn fs_glob(pattern: String) -> AppResult<Vec<String>> {
-    let _ = pattern;
+pub async fn fs_glob(_pattern: String) -> AppResult<Vec<String>> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn fs_exists(path: String) -> AppResult<bool> {
-    let _ = path;
+pub async fn fs_exists(_path: String) -> AppResult<bool> {
     Err(AppError::Other("todo".into()))
 }

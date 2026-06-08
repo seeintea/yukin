@@ -1,20 +1,17 @@
 use crate::{AppError, AppResult};
 
 #[tauri::command]
-pub async fn key_set(provider: String, key: String) -> AppResult<()> {
-    let _ = (provider, key);
+pub async fn key_set(_provider: String, _key: String) -> AppResult<()> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn key_exists(provider: String) -> AppResult<bool> {
-    let _ = provider;
+pub async fn key_exists(_provider: String) -> AppResult<bool> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn key_delete(provider: String) -> AppResult<()> {
-    let _ = provider;
+pub async fn key_delete(_provider: String) -> AppResult<()> {
     Err(AppError::Other("todo".into()))
 }
 

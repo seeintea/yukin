@@ -11,6 +11,6 @@ pub async fn select_workspace() -> AppResult<String> {
 }
 
 #[tauri::command]
-pub async fn set_workspace(path: String) -> AppResult<String> {
+pub async fn set_workspace(_path: String) -> AppResult<String> {
     Err(AppError::Other("todo".into()))
 }
