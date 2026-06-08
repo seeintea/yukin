@@ -75,8 +75,8 @@
 
 ### B4 — `state.rs`:`AppState` + `Arc<RwLock>` + `Send + Sync`(**学习重头戏 2 · 并发模型**)
 
-- 状态: `[ ]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-08
 - **概念课文档**:[learning-notes/B4-state-and-concurrency.md](./learning-notes/B4-state-and-concurrency.md) — 任务、自检、决策记录都在里面
 - 目标:`src-tauri/src/state.rs` 定义 `AppState` 结构 + `impl AppState { pub async fn new(...) -> AppResult<Self> { unimplemented!() } }`;`cargo check` 过;能用 `app.manage(state)` 注册不报 `Send/Sync` 错误。
 - 决策点(必须想清楚再写):**`db: sqlx::SqlitePool` 字段 Phase B 不真初始化**,选一种处理方式:

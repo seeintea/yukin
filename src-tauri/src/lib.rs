@@ -3,9 +3,11 @@ mod commands;
 mod error;
 mod llm;
 mod path_safety;
+mod state;
 mod tools;
 
 pub use error::{AppError, AppResult};
+pub use state::AppState;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
