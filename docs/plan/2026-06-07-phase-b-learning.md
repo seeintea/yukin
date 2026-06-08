@@ -77,12 +77,14 @@
 
 - 状态: `[ ]`
 - 完成日期: ——
+- **概念课文档**:[learning-notes/B4-state-and-concurrency.md](./learning-notes/B4-state-and-concurrency.md) — 任务、自检、决策记录都在里面
 - 目标:`src-tauri/src/state.rs` 定义 `AppState` 结构 + `impl AppState { pub async fn new(...) -> AppResult<Self> { unimplemented!() } }`;`cargo check` 过;能用 `app.manage(state)` 注册不报 `Send/Sync` 错误。
 - 决策点(必须想清楚再写):**`db: sqlx::SqlitePool` 字段 Phase B 不真初始化**,选一种处理方式:
   - (a) 用 `Option<SqlitePool>`(B5 后续直接 manage,字段 None)
   - (b) `db` 字段先不加,Phase C 再补
   - (c) 用 `OnceCell<SqlitePool>` lazy 初始化
   - 各自代价?选哪个?把你的选择记到本步骤"实际收获"里。
+  - **决定**:选 (a) `Option<SqlitePool>`,理由:调用噪音(`.as_ref().ok_or(...)?`)可接受;Phase C 改动局部化(只改 `AppState::new` 内部),不影响 struct 定义和 commands 调用。
 - 教学点:
   - 为什么 Tauri `State<T>` 要求 `T: Send + Sync + 'static`
   - `tokio::sync::RwLock` vs `std::sync::RwLock`:跨 `.await` 持锁会发生什么(死锁路径)
