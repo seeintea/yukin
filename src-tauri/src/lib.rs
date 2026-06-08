@@ -1,3 +1,12 @@
+mod agent;
+mod commands;
+mod error;
+mod llm;
+mod path_safety;
+mod tools;
+
+pub use error::{AppError, AppResult};
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
