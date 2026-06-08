@@ -94,8 +94,8 @@
 
 ### B5 — `lib.rs`:Tauri setup hook + `tracing` + plugin 注册(**学习重头戏 3 · async/Tauri 接缝**)
 
-- 状态: `[~]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-08
 - **概念课文档**:[learning-notes/B5-tauri-setup-and-tracing.md](./learning-notes/B5-tauri-setup-and-tracing.md) — 任务、自检、决策记录都在里面
 - 目标:`src-tauri/src/lib.rs` 删 `greet`;初始化 `tracing_subscriber`;注册 `opener` + `dialog` + `sql` 三个 plugin;setup hook 用 `tauri::async_runtime::block_on` 调 `AppState::new` 后 `app.manage`;`generate_handler![...]` 列出 B3 全部 todo 命令;`pnpm tauri dev` 启动主窗口不崩。
 - 教学点:
@@ -106,6 +106,11 @@
   - `generate_handler![...]` 宏展开扫一眼(`cargo expand` 看真相)
   - plugin 注册顺序有没有讲究
 - 指路:[Tauri — Lifecycle Hooks](https://tauri.app/develop/calling-rust/#lifecycle-hooks)、[tracing-subscriber EnvFilter doc](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)。
+- **实际收获 / 踩坑**:
+  - **AppState::new 选了"选项 B"**(最简 Ok 实现):`workspace=None / db=None / http=Client::new() / runs=HashMap::new()`。理由:窗口能起来 = 整条链路打通,B6 也能继续验证 CSP;Phase C 只改 `AppState::new` 内部把 `db` 从 `None` 改 `Some(pool)`,不影响 struct 定义和调用方。
+  - **commands 命名对齐了一遍**:B3 阶段命名跟 phase B 架构文档不一致(`fs_read_text_file` vs `fs_read`、`pick_workspace` vs `select_workspace`、`keychain_get` vs `key_get` 等)。骨架阶段统一改成架构文档命名,后续阶段不再返工。
+  - **Tauri 2 `__TAURI__` 全局默认不注入**:devtools console 调试要在 `tauri.conf.json` 加 `app.withGlobalTauri: true`(本次只用一下,B6 之前回退;后续看是否长期保留)。或者用 `const { invoke } = await import('@tauri-apps/api/core')`。
+  - **验证通过**:`pnpm tauri dev` 启动 → 终端看到 `INFO yukin: yukin setup complete` → devtools console `invoke('get_workspace')` 返回 `{code:"other", message:"todo"}`。
 
 ### B6 — 配置收尾:capabilities + CSP
 

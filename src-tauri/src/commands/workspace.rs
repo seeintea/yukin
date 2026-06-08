@@ -6,11 +6,11 @@ pub async fn get_workspace() -> AppResult<Option<String>> {
 }
 
 #[tauri::command]
-pub async fn set_workspace(path: String) -> AppResult<()> {
+pub async fn select_workspace() -> AppResult<String> {
     Err(AppError::Other("todo".into()))
 }
 
 #[tauri::command]
-pub async fn pick_workspace() -> AppResult<Option<String>> {
+pub async fn set_workspace(path: String) -> AppResult<String> {
     Err(AppError::Other("todo".into()))
 }

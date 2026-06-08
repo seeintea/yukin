@@ -15,6 +15,11 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(_app: &AppHandle) -> AppResult<Self> {
-        unimplemented!()
+        Ok(Self {
+            workspace: RwLock::new(None),
+            db: None,
+            http: reqwest::Client::new(),
+            runs: RwLock::new(HashMap::new()),
+        })
     }
 }
