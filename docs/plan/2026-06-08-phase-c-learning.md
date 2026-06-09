@@ -76,20 +76,20 @@
 
 ### C2 — `AppState::new` 真实现:连 db / 跑 migration / 回填 workspace
 
-- 状态: `[ ]`
+- 状态: `[~]`
 - 完成日期: ——
-- **概念课文档**:_待写,C2 开工前再起_(路径 `learning-notes/C2-appstate-lifecycle-and-pool.md`)
+- **概念课文档**:[learning-notes/C2-appstate-lifecycle-and-pool.md](./learning-notes/C2-appstate-lifecycle-and-pool.md)
 - 目标:把 `state.rs` 里 `AppState::new` 从 `unimplemented!()` 改成真实现。`pnpm tauri dev` 启动后 db 文件存在,schema 已建。
-- 决策点:
-  - (i) 是否趁机把 `db: Option<SqlitePool>` 改成裸 `SqlitePool`?(全局决策已倾向保留 Option,C2 是最后翻盘机会)
-  - (ii) `AppState::new` 一坨长函数 vs 拆成 `open_db / run_migrations / load_workspace` 三个私有助手?(推荐拆)
+- 决策点(已定 2026-06-09):
+  - (i) **`db` 字段改裸 `SqlitePool`** —— 不是 `Option<SqlitePool>`。理由:db 起不来 app 就不该起来,Option 是谎言类型;C2 是改这事的零成本窗口期(0 处调用方)。
+  - (ii) **`AppState::new` 拆 `open_db / run_migrations / load_workspace` 三个私有助手** —— 理由:错误定位清晰、可单测、未来 setup 加东西不臃肿。
 - 教学点:
   - `app.path().app_data_dir()` 跨平台行为(mac / win / linux 各到哪)
   - `SqlitePoolOptions::max_connections(1)` 与 SQLite 写者全局锁
-  - **Windows 连接 URL 路径坑**(反斜杠 / 空格 / `?mode=rwc`)
+  - **Windows 连接 URL 路径坑**(反斜杠 / 空格 / `?mode=rwc`)→ 用 `SqliteConnectOptions::filename()` 绕开
   - `sqlx::migrate!("./migrations")` 路径相对 `Cargo.toml` 不是源文件
-  - **必须加 `PRAGMA foreign_keys=ON`**(phase-c doc 漏写)+ WAL
-  - 第一次三种 IO 错误源 (`io::Error` / `sqlx::Error` / `MigrateError`) 在同一函数链上靠 `?` 穿透
+  - **三条必加 PRAGMA**:`foreign_keys=ON`(per-connection!)、`journal_mode=WAL`、可选 `busy_timeout`
+  - 第一次 4 种 IO 错误源 (`io::Error` / `sqlx::Error` / `MigrateError` / `tauri::Error`) 在同一函数链上靠 `?` 穿透 → 需补 `AppError::Migrate` + `AppError::Tauri` 变体
 - 指路:[sqlx::pool::PoolOptions](https://docs.rs/sqlx/latest/sqlx/pool/struct.PoolOptions.html)、[Tauri PathResolver](https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html)。
 - 预估时长:2–4h
 
