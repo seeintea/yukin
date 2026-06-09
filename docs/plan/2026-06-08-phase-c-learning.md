@@ -55,8 +55,8 @@
 
 ### C1 — `migrations/0001_init.sql`:schema 设计 + FTS5 trigger
 
-- 状态: `[ ]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-09
 - **概念课文档**:[learning-notes/C1-sqlite-schema-and-fts5.md](./learning-notes/C1-sqlite-schema-and-fts5.md)
 - 目标:新建 `src-tauri/migrations/0001_init.sql`,按 phase-c doc 第 11–64 行写 5 张表 + FTS5 虚拟表 + **3 个同步 trigger**(doc 里只写了注释占位,你来补)+ 2 个 index。sqlite CLI 手动跑通 schema。
 - 决策点:无(全局决策已在 C1 开工前定)
@@ -68,6 +68,11 @@
   - 外键 cascade 需要 `PRAGMA foreign_keys=ON`(C2 加)
 - 指路:[SQLite FTS5 docs](https://www.sqlite.org/fts5.html)、[sqlx-cli README](https://github.com/launchbadge/sqlx/tree/main/sqlx-cli)。
 - 预估时长:2–3h
+- **实际收获 / 踩坑**:
+  - **选择偷懒,由代理直接写 schema** —— 跳过手写 SQL 学习,直接拿成品。C2 起回归用户主导节奏。
+  - **mac 环境配 sqlx-cli**:`export DATABASE_URL="sqlite:./dev.db"`(不是 PowerShell 的 `$env:DATABASE_URL = "..."`,文档原本是 Win 视角)
+  - **`sqlx migrate run` 必须在 `src-tauri/` 下跑** —— 它默认从 cwd 找 `migrations/` 目录,不在则报 `error canonicalizing path migrations`。可显式 `--source ./migrations` 兜底
+  - **验证全通过**:`.tables` 看到 6 张表 (`memory/memory_fts/messages/providers/sessions/settings/_sqlx_migrations`),`type='trigger'` 看到 `memory_ai/ad/au`,3 个 index 齐全
 
 ### C2 — `AppState::new` 真实现:连 db / 跑 migration / 回填 workspace
 
