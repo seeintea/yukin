@@ -103,14 +103,14 @@
 
 ### C3 — `commands/memory.rs` + DTO + `#[sqlx::test]` 集成测试(**🔥 学习重头戏 1**)
 
-- 状态: `[ ]`
+- 状态: `[~]`
 - 完成日期: ——
-- **概念课文档**:_待写,C3 开工前再起_(路径 `learning-notes/C3-sqlx-and-dto-and-tests.md`)
-- 目标:实现 `memory_save / memory_recall / memory_list / memory_delete / memory_update` 5 个命令;建 `db/memory.rs` 放纯 SQL;DTO `MemorySaveInput` / `MemoryRow`;补 `AppError::Json` 变体;写至少 3 个 `#[sqlx::test]` 通过。
-- 决策点:
-  - (i) `MemoryKind` 用 enum 还是 String?(推介 enum + `#[serde(rename_all = "snake_case")]` + `impl as_str()`)
-  - (ii) `MemorySaveInput` 与 `MemoryRow` 合并还是分离?(我会力推分离)
-  - (iii) FTS5 用户输入是否 sanitize?(Phase C 选简单"原样传"并挂 TODO)
+- **概念课文档**:[learning-notes/C3-sqlx-and-dto-and-tests.md](./learning-notes/C3-sqlx-and-dto-and-tests.md)
+- 目标:实现 `memory_save / memory_recall / memory_list / memory_delete / memory_update` 5 个命令;建 `db/memory.rs` 放纯 SQL;DTO `MemorySaveInput` / `MemoryUpdate` / `MemoryRow`;补 `AppError::Json` 变体;写至少 3 个 `#[sqlx::test]` 通过。
+- 决策点(已定 2026-06-09):
+  - (i) **`MemoryKind` 用 enum** + `as_str()` + `#[serde(rename_all = "snake_case")]`。类型安全 + 学 serde rename_all idiom;sqlx 端用 `as_str()` 转字符串,`MemoryRow.kind` 用 `String` 保留(避免 sqlx 反向 decode 复杂度)
+  - (ii) **DTO 三个独立类型**:`MemorySaveInput` / `MemoryUpdate` / `MemoryRow`。类型即契约,patch 语义只能用全 Option + `COALESCE` 表达
+  - (iii) **FTS5 用户输入原样传 + TODO 注释**。调用方是 agent (LLM),v1 MVP 不需要防御性 sanitize
 - 教学点:
   - sqlx 三件套对比表 + 为什么我们选 `query!` 派
   - `#[derive(sqlx::FromRow)]` 工作机制
