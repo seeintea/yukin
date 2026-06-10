@@ -76,8 +76,8 @@
 
 ### C2 — `AppState::new` 真实现:连 db / 跑 migration / 回填 workspace
 
-- 状态: `[~]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-09
 - **概念课文档**:[learning-notes/C2-appstate-lifecycle-and-pool.md](./learning-notes/C2-appstate-lifecycle-and-pool.md)
 - 目标:把 `state.rs` 里 `AppState::new` 从 `unimplemented!()` 改成真实现。`pnpm tauri dev` 启动后 db 文件存在,schema 已建。
 - 决策点(已定 2026-06-09):
@@ -92,6 +92,14 @@
   - 第一次 4 种 IO 错误源 (`io::Error` / `sqlx::Error` / `MigrateError` / `tauri::Error`) 在同一函数链上靠 `?` 穿透 → 需补 `AppError::Migrate` + `AppError::Tauri` 变体
 - 指路:[sqlx::pool::PoolOptions](https://docs.rs/sqlx/latest/sqlx/pool/struct.PoolOptions.html)、[Tauri PathResolver](https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html)。
 - 预估时长:2–4h
+- **实际收获 / 踩坑**:
+  - **两个决策按 C2 概念课定稿**:`db` 裸 `SqlitePool` + `new` 拆 3 助手 (`open_db` / `run_migrations` / `load_workspace`)
+  - **`AppError` 加 2 个 `#[from]` 变体** (`Migrate` + `Tauri`) + `Serialize` `code` match 同步更新
+  - **跨平台路径用 `SqliteConnectOptions::filename()`** 而非字符串拼 URL,规避 Win 反斜杠/空格坑
+  - **PRAGMA 全链式**:`foreign_keys(true).journal_mode(Wal).busy_timeout(5s)`,一行表达连接属性
+  - **`load_workspace` 用 `fetch_optional`**,settings 表空时返回 `Ok(None)`,不会 `RowNotFound`
+  - **5 个错误源 (`io / sqlx / Migrate / Tauri / Other`) 全靠 `?` 自动透传**,无任何 `.map_err`
+  - **验证全过**:`pnpm tauri dev` 启动看到 `opening db` + `migrations applied` 日志,`~/Library/Application Support/xyz.yukin.agent/` 下出现 `yukin.db` + `-wal` + `-shm` 三件套
 
 ### C3 — `commands/memory.rs` + DTO + `#[sqlx::test]` 集成测试(**🔥 学习重头戏 1**)
 

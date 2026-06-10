@@ -20,6 +20,10 @@ pub enum AppError {
     Llm(String),
     #[error("cancelled")]
     Cancelled,
+    #[error("migrate: {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("tauri: {0}")]
+    Tauri(#[from] tauri::Error),
     #[error("{0}")]
     Other(String),
 }
@@ -41,6 +45,8 @@ impl serde::Serialize for AppError {
             AppError::Http(_) => "http",
             AppError::Llm(_) => "llm",
             AppError::Cancelled => "cancelled",
+            AppError::Migrate(_) => "migrate",
+            AppError::Tauri(_) => "tauri",
             AppError::Other(_) => "other",
         };
         let mut s = serializer.serialize_struct("AppError", 2)?;
