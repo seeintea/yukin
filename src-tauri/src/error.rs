@@ -24,6 +24,8 @@ pub enum AppError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("tauri: {0}")]
     Tauri(#[from] tauri::Error),
+    #[error("json: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("{0}")]
     Other(String),
 }
@@ -47,6 +49,7 @@ impl serde::Serialize for AppError {
             AppError::Cancelled => "cancelled",
             AppError::Migrate(_) => "migrate",
             AppError::Tauri(_) => "tauri",
+            AppError::Json(_) => "json",
             AppError::Other(_) => "other",
         };
         let mut s = serializer.serialize_struct("AppError", 2)?;

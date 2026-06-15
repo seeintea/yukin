@@ -1,5 +1,6 @@
 mod agent;
 mod commands;
+mod db;
 mod error;
 mod llm;
 mod path_safety;

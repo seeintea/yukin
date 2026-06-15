@@ -123,6 +123,20 @@
   - **chrono ↔ SQLite datetime 格式不兼容**(`datetime('now')` 输出无 T 无时区,默认 RFC3339 解析失败)→ 三种解法选一个
 - 指路:[sqlx-macros docs](https://docs.rs/sqlx/latest/sqlx/macro.query.html)、[sqlx Test docs](https://docs.rs/sqlx/latest/sqlx/attr.test.html)。
 - 预估时长:**6–10h(分 2–3 个学习时段)。不要中断**
+- **细分时段建议**(types 完成后追加):
+  - **段 1**(1.5–2.5h):`error.rs` 加 `Json` 变体 + 写 `save` + `fetch` 两个函数。`save` 是最慢的(第一次撞 sqlx Encode / fetch 选型 / 多步 INSERT-then-select),后续函数会快
+  - **段 2**(1.5–2.5h):`recall` + `list` + `delete` + `update` 四个函数。`recall` 撞 FTS5 表 sqlx 不识别问题(预期回退 `query_as` runtime 校验)
+  - **段 3**(1.5–2.5h):3 个 `#[sqlx::test]` + commands 薄壳 + `lib.rs` 加 `memory_update`
+  - **段 4**(1–2h):devtools 端到端联调 5 个命令链路 + 撞坑修
+- **节奏建议**:
+  - 第一个函数 (`save`) 不追求完美,能跑通就行 —— 后面函数会让你看清更好的写法,回头重构
+  - 撞错误立刻加 `AppError` 变体,不要 `.map_err()` —— 这是肌肉记忆训练
+  - 测试先过最简的 `save_then_recall`,再写 `delete_then_recall` / `update_content`
+- **当前进度**(2026-06-09):
+  - ✅ `db/mod.rs` + `db/memory.rs` types 部分(`MemoryKind` / `MemorySaveInput` / `MemoryUpdate` / `MemoryRow`)
+  - ✅ `error.rs` 加 `Json(#[from] serde_json::Error)` 变体 + Serialize code match
+  - ✅ `lib.rs` 加 `mod db;`
+  - ⏳ 段 1-4 待完成
 
 ### C4 — `commands/keychain.rs` + `spawn_blocking`(**🔥 学习重头戏 2**)
 
