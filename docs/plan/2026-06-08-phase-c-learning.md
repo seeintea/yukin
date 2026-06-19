@@ -150,39 +150,40 @@
 
 ### C4 — `commands/keychain.rs` + `spawn_blocking`(**🔥 学习重头戏 2**)
 
-- 状态: `[ ]`
+- 状态: `[~]`
 - 完成日期: ——
-- **概念课文档**:_待写,C4 开工前再起_(路径 `learning-notes/C4-spawn-blocking-and-keychain.md`)
-- 目标:实现 `key_set / key_get / key_delete / key_list_providers` 4 个命令;关键技巧 `tokio::task::spawn_blocking`;`providers` 表 upsert。**注意:当前 stub 是 `key_exists`,C4 要改 `lib.rs::generate_handler!`**。
-- 决策点:
-  - (i) 给 `AppError` 加 `JoinError(#[from] tokio::task::JoinError)` 变体,还是 `.map_err(|e| AppError::Other(...))`?
-  - (ii) `keyring::Error::NoEntry` 是错误还是 `Ok(None)`?(语义上是后者)
+- **概念课文档**:[learning-notes/C4-C5-keychain-and-sessions.md](./learning-notes/C4-C5-keychain-and-sessions.md)(C4 + C5 合并,因主要套路与 C3 相同,各自只有 1-2 个新知识点)
+- 目标:实现 `key_set / key_exists / key_delete / key_list_providers` 4 个命令;关键技巧 `tokio::task::spawn_blocking`;`providers` 表 upsert。
+- 决策点(已定 2026-06-15):
+  - (i) **`AppError` 加 `JoinError(#[from] tokio::task::JoinError)` 变体** —— 跟项目 `?` 透传纪律一致,Phase G agent loop 还会重度用 spawn_blocking
+  - (ii) **`keyring::Error::NoEntry` 视作 `Ok(None)` / `Ok(())`** —— 业务"未配置"非错误,跟 C2 `load_workspace` `fetch_optional` 同思路
 - 教学点:
   - tokio runtime 两类线程(worker vs blocking pool)
   - 什么算"阻塞"(同步 IO / 系统调用 / CPU 密集 / `std::thread::sleep`)
   - `spawn_blocking` 签名拆解(`FnOnce + Send + 'static` / `R: Send + 'static`)**← 回看 B4**
-  - `JoinHandle<R>` / `JoinError` / **双层 Result 三种拆法**
+  - `JoinHandle<R>` / `JoinError` / **双层 Result 三种拆法**(双 ? / match / 双 .map_err)
   - 平台差异表(macOS Keychain / Windows Credential Manager / Linux libsecret)
-  - SQLite `ON CONFLICT DO UPDATE` upsert 语法(跟 PG/MySQL 不同)
-  - 为什么 `key_list_providers` 查 db 而不是问 keyring(keyring 没列举 API)
+  - SQLite `ON CONFLICT DO UPDATE` upsert 语法(`excluded.col` 引用 INSERT 试图插入的值)
+  - 为什么 `key_list_providers` 查 db 而不是问 keyring(keyring 没列举 API,所以 `providers.has_key` 是必要的索引镜像)
 - 指路:[tokio::task::spawn_blocking](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html)、[keyring crate](https://docs.rs/keyring/latest/keyring/)。
 - 预估时长:3–5h
 
 ### C5 — `commands/session.rs` + JSON content + 1:N cascade
 
-- 状态: `[ ]`
+- 状态: `[~]`
 - 完成日期: ——
-- **概念课文档**:_待写,C5 开工前再起_(路径 `learning-notes/C5-sessions-and-json-content.md`)
-- 目标:实现 6 个 session 命令(`session_create / session_list / session_update / session_delete / session_append_message / session_load_messages`);新增 4 个 DTO;补 2 个 `#[sqlx::test]`(`create_then_list` / `delete_cascades_messages`)。
-- 决策点:
-  - (i) `messages.content` 用 `String` 还是 `serde_json::Value`?(推介 `Value` + `#[sqlx(json)]`)
-  - (ii) `session_update` 全 None 时直接 `Ok(())` 还是 `Err`?
+- **概念课文档**:[learning-notes/C4-C5-keychain-and-sessions.md](./learning-notes/C4-C5-keychain-and-sessions.md)(同 C4)
+- 目标:实现 6 个 session 命令(`session_create / session_list / session_update / session_delete / session_append_message / session_load_messages`);新增 4 个 DTO;补 3 个 `#[sqlx::test]`(`create_then_list` / `delete_cascades_messages` / `update_patch_only_title`)。
+- 决策点(已定 2026-06-15):
+  - (i) **`messages.content` 用 `String` + 前端 JSON.parse** —— 跟 `memory.metadata` 一致,后端不读 content 内部结构,Phase G 真要再升级
+  - (ii) **`session_update` 全 None 时 `Ok(())`** —— 跟 `memory_update` 一致,`updated_at` 总是刷新("标记看过"语义)
 - 教学点:
-  - 1:N + cascade 真实测试(`delete_cascades_messages` 验证 C2 的 PRAGMA 真生效)
-  - `String` vs `serde_json::Value` 字段取舍
-  - patch 语义(`Option<String>` + `COALESCE(?1, title)` pattern)
-  - `tool_calls` / `tool_results` 字段 Phase G 才填,`Option<Value>` + `skip_serializing_if`
-- 指路:[sqlx json feature docs](https://docs.rs/sqlx/latest/sqlx/types/struct.Json.html)。
+  - 1:N + cascade **真实测试**(`delete_cascades_messages` 验证 C1 schema + C2 PRAGMA 串通)
+  - **`#[sqlx::test]` 临时 db 默认 foreign_keys=OFF**,测试要手动 PRAGMA 模拟 production
+  - `String` vs `serde_json::Value` 字段取舍(项目级风格统一是关键)
+  - patch 语义(`Option<String>` + `COALESCE(?1, title)` pattern,跟 memory_update 同样套路)
+  - `tool_calls` / `tool_results` 字段 Phase G 才填,`Option<String>` + 默认 NULL
+- 指路:[sqlx::test docs](https://docs.rs/sqlx/latest/sqlx/attr.test.html)、[SQLite ON CONFLICT](https://www.sqlite.org/lang_upsert.html)。
 - 预估时长:1.5–3h
 
 ---
