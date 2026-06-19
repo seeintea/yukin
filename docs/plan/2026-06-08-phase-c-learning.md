@@ -103,8 +103,8 @@
 
 ### C3 — `commands/memory.rs` + DTO + `#[sqlx::test]` 集成测试(**🔥 学习重头戏 1**)
 
-- 状态: `[~]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-15
 - **概念课文档**:[learning-notes/C3-sqlx-and-dto-and-tests.md](./learning-notes/C3-sqlx-and-dto-and-tests.md)
 - 目标:实现 `memory_save / memory_recall / memory_list / memory_delete / memory_update` 5 个命令;建 `db/memory.rs` 放纯 SQL;DTO `MemorySaveInput` / `MemoryUpdate` / `MemoryRow`;补 `AppError::Json` 变体;写至少 3 个 `#[sqlx::test]` 通过。
 - 决策点(已定 2026-06-09):
@@ -133,10 +133,20 @@
   - 撞错误立刻加 `AppError` 变体,不要 `.map_err()` —— 这是肌肉记忆训练
   - 测试先过最简的 `save_then_recall`,再写 `delete_then_recall` / `update_content`
 - **当前进度**(2026-06-09):
-  - ✅ `db/mod.rs` + `db/memory.rs` types 部分(`MemoryKind` / `MemorySaveInput` / `MemoryUpdate` / `MemoryRow`)
-  - ✅ `error.rs` 加 `Json(#[from] serde_json::Error)` 变体 + Serialize code match
-  - ✅ `lib.rs` 加 `mod db;`
-  - ⏳ 段 1-4 待完成
+  - ✅ 段 0:DTO 类型骨架(`MemoryKind` / `MemorySaveInput` / `MemoryUpdate` / `MemoryRow`)+ `error.rs` 加 `Json` 变体 + `lib.rs` 加 `mod db`
+  - ✅ 段 1:`save` + `fetch` 函数(用户写)
+  - ✅ 段 2:`recall` + `list` + `delete` + `update`(代理代写,理解后委托)
+  - ✅ 段 3:3 个 `#[sqlx::test]` + commands 薄壳 + lib.rs 加 `memory_update`,`cargo test memory` 全过
+  - ✅ 段 4:Settings 页加 memory smoke test 按钮,7 步 UI 链路全绿
+- **实际收获 / 踩坑**:
+  - **DTO 三件套分离实战**:`MemorySaveInput` (no id/timestamps) / `MemoryUpdate` (all Option for patch) / `MemoryRow` (sqlx::FromRow,kind/datetime 全 String 避反向 decode)
+  - **commands 薄壳模式**:每个命令 ≤ 5 行,只做 DTO 转换 + `&state.db` 注入,SQL 全在 `db/memory.rs`,可独立测试
+  - **`?` 跨 5 错误源穿透**:`io / sqlx / Migrate / Tauri / Json`,加 `Json(#[from] serde_json::Error)` 后 `serde_json::to_string()?` 自动透传
+  - **纪律修正:`query!` 派**:首版 stage 2 偷懒走 `query` runtime 派,review 时拉回 `query!`/`query_as!` 编译期校验。`recall` 因 FTS5 虚拟表豁免保留 runtime
+  - **SQLite 类型推断坑**:`query_as!` 在 SQLite 上要用 `AS "col!"` 显式断言 NOT NULL(SQLite schema 不向 sqlx 暴露 nullability),`r#""#` raw string 包住 SQL
+  - **3 个 sqlx::test 验 trigger 链路**:`save_then_recall` / `delete_then_recall_returns_empty` / `update_content_changes_recall_target`,确认 C1 schema 的 INSERT/UPDATE/DELETE trigger 真接通 FTS5
+  - **环境配置**:`src-tauri/.env` 设 `DATABASE_URL=sqlite:./dev.db`,`query!` 编译期校验需要(.gitignore 已挡)
+  - **端到端联调通过**:Settings 页一键跑 7 步 (save → recall → list → update → recall → delete → recall),全绿验证 IPC + AppError 序列化 + sqlx 链路完全贯通
 
 ### C4 — `commands/keychain.rs` + `spawn_blocking`(**🔥 学习重头戏 2**)
 

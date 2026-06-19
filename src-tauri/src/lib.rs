@@ -64,6 +64,7 @@ pub fn run() {
             commands::memory::memory_recall,
             commands::memory::memory_list,
             commands::memory::memory_delete,
+            commands::memory::memory_update,
             commands::session::session_create,
             commands::session::session_list,
             commands::session::session_update,
