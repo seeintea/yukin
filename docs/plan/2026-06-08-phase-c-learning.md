@@ -150,8 +150,8 @@
 
 ### C4 — `commands/keychain.rs` + `spawn_blocking`(**🔥 学习重头戏 2**)
 
-- 状态: `[~]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-15
 - **概念课文档**:[learning-notes/C4-C5-keychain-and-sessions.md](./learning-notes/C4-C5-keychain-and-sessions.md)(C4 + C5 合并,因主要套路与 C3 相同,各自只有 1-2 个新知识点)
 - 目标:实现 `key_set / key_exists / key_delete / key_list_providers` 4 个命令;关键技巧 `tokio::task::spawn_blocking`;`providers` 表 upsert。
 - 决策点(已定 2026-06-15):
@@ -170,8 +170,8 @@
 
 ### C5 — `commands/session.rs` + JSON content + 1:N cascade
 
-- 状态: `[~]`
-- 完成日期: ——
+- 状态: `[x]`
+- 完成日期: 2026-06-15
 - **概念课文档**:[learning-notes/C4-C5-keychain-and-sessions.md](./learning-notes/C4-C5-keychain-and-sessions.md)(同 C4)
 - 目标:实现 6 个 session 命令(`session_create / session_list / session_update / session_delete / session_append_message / session_load_messages`);新增 4 个 DTO;补 3 个 `#[sqlx::test]`(`create_then_list` / `delete_cascades_messages` / `update_patch_only_title`)。
 - 决策点(已定 2026-06-15):
@@ -185,6 +185,16 @@
   - `tool_calls` / `tool_results` 字段 Phase G 才填,`Option<String>` + 默认 NULL
 - 指路:[sqlx::test docs](https://docs.rs/sqlx/latest/sqlx/attr.test.html)、[SQLite ON CONFLICT](https://www.sqlite.org/lang_upsert.html)。
 - 预估时长:1.5–3h
+- **实际收获 / 踩坑(C4 + C5 合并记录)**:
+  - **keyring v3 平台后端必须显式开 feature** ⚠️ 最大坑:`keyring = "3"` 不带 feature 时 fallback 到 `mock` 后端(进程内存),`set_password` 表面成功但 Keychain Access 找不到。改 `features = ["apple-native", "windows-native"]` 后真写进 macOS Keychain(`security find-generic-password -s "xyz.yukin.agent" -a "anthropic" -w` 可验)。Linux 未覆盖,发布前补 `linux-native`/`sync-secret-service`
+  - **`spawn_blocking` + 双 `?`**:closure 内 `AppResult`,外层 `JoinError`,`.await??` 一次解两层。需先给 `AppError` 加 `Join(#[from] JoinError)` 变体
+  - **`NoEntry` 折叠为 `Ok`**:`key_exists` 返 `Ok(false)`、`key_delete` 幂等 `Ok(())`,业务"未配置"非错误
+  - **`providers` 表是索引镜像**:keyring 无列举 API,`has_key` 列给前端"已配置 provider 列表"用;keychain 真值与 db 镜像可能短暂不一致,容忍
+  - **SQLite UPSERT**:`ON CONFLICT(name) DO UPDATE SET has_key = excluded.has_key`,`excluded.<col>` 引用本次 INSERT 试图插入的值
+  - **`#[sqlx::test]` 默认 `foreign_keys=OFF`**:`delete_cascades_messages` 必须手动 `PRAGMA foreign_keys=ON` 模拟 production,否则 cascade 静默不生效、测试"因错误原因通过"
+  - **`datetime('now')` 秒级精度 + ORDER BY 顺序未定义** ⚠️ 实测踩坑:同秒创建两条 session,`updated_at` 相等,`ORDER BY updated_at DESC` 顺序未定义 → `all[0]` 是先创建的而非后创建的。修法:`ORDER BY updated_at DESC, rowid DESC`(`rowid` 隐式自增作 tiebreaker)。`memory::list` 同步修。Phase H `load_messages` 按 `created_at` 排序同样要加 `rowid` tiebreaker
+  - **JSON content 用 String**:跟 `memory.metadata` 一致,前端 `JSON.stringify`/`parse`,后端 v1 不读 content 内部结构
+  - **验证全过**:`cargo test --lib` 8 个测试(memory 3 + keychain 2 + session 3)全绿;devtools 端到端 key_set → Keychain Access 可见 `xyz.yukin.agent`/`anthropic`;session 6 命令链路通
 
 ---
 
@@ -192,15 +202,15 @@
 
 与 phase-c 原文档"验证"一致:
 
-- [ ] `~/Library/Application Support/xyz.yukin.agent/yukin.db`(mac)/ `%APPDATA%/xyz.yukin.agent/yukin.db`(win) 启动后存在
-- [ ] devtools: `invoke('memory_save', {input:{name:"t",kind:"user",content:"hello",metadata:{}}})` 返回 id
-- [ ] devtools: `invoke('memory_recall', {query:"hello"})` 返回数组
-- [ ] DB Browser 打开 yukin.db 验证 memory 行
-- [ ] `invoke('key_set', {provider:"anthropic", key:"sk-ant-test"})` 无错
-- [ ] Windows Credential Manager / mac Keychain Access 搜 "xyz.yukin.agent" 显示条目 "anthropic"
-- [ ] `invoke('key_get', {provider:"anthropic"})` 返回 "sk-ant-test"
-- [ ] `invoke('session_create', {title:"test"})` 返回 session 对象
-- [ ] `cargo test` 全绿(至少 5 个 `#[sqlx::test]`)
+- [x] `~/Library/Application Support/xyz.yukin.agent/yukin.db`(mac)/ `%APPDATA%/xyz.yukin.agent/yukin.db`(win) 启动后存在
+- [x] devtools: `invoke('memory_save', {input:{name:"t",kind:"user",content:"hello",metadata:{}}})` 返回 id
+- [x] devtools: `invoke('memory_recall', {query:"hello"})` 返回数组
+- [x] DB Browser 打开 yukin.db 验证 memory 行
+- [x] `invoke('key_set', {provider:"anthropic", key:"sk-ant-test"})` 无错
+- [x] Windows Credential Manager / mac Keychain Access 搜 "xyz.yukin.agent" 显示条目 "anthropic"
+- [x] `invoke('key_get', {provider:"anthropic"})` 返回 "sk-ant-test"(注:v1 前端不暴露 key_get,内部用 `key_exists`;`security` CLI 可验)
+- [x] `invoke('session_create', {title:"test"})` 返回 session 对象
+- [x] `cargo test` 全绿(8 个 `#[sqlx::test]`: memory 3 + keychain 2 + session 3)
 
 ---
 

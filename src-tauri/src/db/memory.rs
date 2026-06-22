@@ -183,6 +183,8 @@ pub async fn recall(
 
 /// 列出所有 memory,可按 kind 过滤。最多 100 条,按 updated_at 倒序。
 pub async fn list(pool: &SqlitePool, kind: Option<&str>) -> AppResult<Vec<MemoryRow>> {
+    // ORDER BY rowid DESC 作 tiebreaker:datetime('now') 秒级精度,
+    // 同秒创建的多条 updated_at 相同,rowid 降序保证后插入的排前。
     match kind {
         Some(k) => sqlx::query_as!(
             MemoryRow,
@@ -196,7 +198,7 @@ pub async fn list(pool: &SqlitePool, kind: Option<&str>) -> AppResult<Vec<Memory
                  workspace,
                  created_at  AS "created_at!",
                  updated_at  AS "updated_at!"
-               FROM memory WHERE kind = ? ORDER BY updated_at DESC LIMIT 100"#,
+               FROM memory WHERE kind = ? ORDER BY updated_at DESC, rowid DESC LIMIT 100"#,
             k
         )
         .fetch_all(pool)
@@ -214,7 +216,7 @@ pub async fn list(pool: &SqlitePool, kind: Option<&str>) -> AppResult<Vec<Memory
                  workspace,
                  created_at  AS "created_at!",
                  updated_at  AS "updated_at!"
-               FROM memory ORDER BY updated_at DESC LIMIT 100"#
+               FROM memory ORDER BY updated_at DESC, rowid DESC LIMIT 100"#
         )
         .fetch_all(pool)
         .await

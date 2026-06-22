@@ -27,10 +27,10 @@ C3 已经把这些概念打透了:
 
 C4/C5 **重复练习这些** + **各加 1 个新东西**:
 
-| 阶段 | 新知识 |
-|------|------|
-| C4 | `tokio::task::spawn_blocking` —— 同步 keyring crate 在 async 里 |
-| C5 | JSON 字段 + 1:N cascade 实测 |
+| 阶段 | 新知识                                                              |
+| ---- | ------------------------------------------------------------------- |
+| C4   | `tokio::task::spawn_blocking` —— 同步 keyring crate 在 async 里 |
+| C5   | JSON 字段 + 1:N cascade 实测                                        |
 
 合并文档密度高、避免重复、你内存里 C3 还热乎、心智成本最低。
 
@@ -38,12 +38,12 @@ C4/C5 **重复练习这些** + **各加 1 个新东西**:
 
 ## 📌 1. 决策点(已定 2026-06-15)
 
-| # | 决策 | 选择 |
-|---|------|------|
-| C4 (i) | `spawn_blocking` JoinError 处理 | **加 `AppError::JoinError(#[from] tokio::task::JoinError)`**,纪律一致 |
-| C4 (ii) | `keyring::Error::NoEntry` 视为? | **`Ok(None)`**,跟 C2 `load_workspace` 同思路 |
-| C5 (i) | `messages.content` 用 String 还是 Value? | **String + 前端 JSON.parse**,跟 `memory.metadata` 一致 |
-| C5 (ii) | `session_update` 全 None 时? | **`Ok(())`**,跟 `memory_update` 一致(后端宽松) |
+| #       | 决策                                       | 选择                                                                          |
+| ------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| C4 (i)  | `spawn_blocking` JoinError 处理          | **加 `AppError::JoinError(#[from] tokio::task::JoinError)`**,纪律一致 |
+| C4 (ii) | `keyring::Error::NoEntry` 视为?          | **`Ok(None)`**,跟 C2 `load_workspace` 同思路                        |
+| C5 (i)  | `messages.content` 用 String 还是 Value? | **String + 前端 JSON.parse**,跟 `memory.metadata` 一致                |
+| C5 (ii) | `session_update` 全 None 时?             | **`Ok(())`**,跟 `memory_update` 一致(后端宽松)                      |
 
 ---
 
@@ -181,6 +181,7 @@ CREATE TABLE providers (
 ### 答案:keychain 没有"列举 API"
 
 keyring crate 提供:
+
 - `Entry::new(service, account).set_password(...)`
 - `Entry::new(service, account).get_password()`
 - `Entry::new(service, account).delete_credential()`
@@ -227,6 +228,7 @@ ON CONFLICT(name) DO UPDATE SET
 ```
 
 要点:
+
 - **`ON CONFLICT(<col>)`** 必须是 PRIMARY KEY 或 UNIQUE constraint
 - **`DO UPDATE SET ...`** 是冲突时的更新逻辑
 - 跟 PostgreSQL `ON CONFLICT (...) DO UPDATE SET ...` 语法一致;跟 MySQL `ON DUPLICATE KEY UPDATE` 不一样
@@ -465,14 +467,14 @@ created_at   TEXT
 
 **关键的 6 个命令**:
 
-| 命令 | 操作 |
-|------|------|
-| `session_create(title)` | 新会话,返回 Session row |
-| `session_list()` | 列出所有会话(按 updated_at 降序) |
-| `session_update(id, patch)` | patch 语义更新(title/workspace_path/provider/model) |
-| `session_delete(id)` | 删 → cascade 删 messages |
-| `session_append_message(...)` | 加一条 message |
-| `session_load_messages(session_id)` | 列出该会话的所有消息 |
+| 命令                                  | 操作                                                |
+| ------------------------------------- | --------------------------------------------------- |
+| `session_create(title)`             | 新会话,返回 Session row                             |
+| `session_list()`                    | 列出所有会话(按 updated_at 降序)                    |
+| `session_update(id, patch)`         | patch 语义更新(title/workspace_path/provider/model) |
+| `session_delete(id)`                | 删 → cascade 删 messages                           |
+| `session_append_message(...)`       | 加一条 message                                      |
+| `session_load_messages(session_id)` | 列出该会话的所有消息                                |
 
 ## 📚 9. JSON content 字段(决策 C5 (i))
 
@@ -502,7 +504,7 @@ pub struct MessageRow {
 }
 ```
 
-**为什么不用 sqlx::types::Json<Value>?**
+**为什么不用 sqlx::types::Json`<Value>`?**
 
 - 跟 `memory.metadata` 风格一致(C3 已经决定 String + 前端 parse)
 - v1 后端不读 content 内部结构,**没必要付强类型成本**
@@ -646,6 +648,8 @@ pub async fn fetch(pool: &SqlitePool, id: &str) -> AppResult<SessionRow> {
 }
 
 pub async fn list(pool: &SqlitePool) -> AppResult<Vec<SessionRow>> {
+    // ORDER BY rowid DESC 作 tiebreaker:datetime('now') 秒级精度,
+    // 同秒创建的多条 updated_at 相同,rowid 降序保证后插入的排前。
     sqlx::query_as!(
         SessionRow,
         r#"SELECT
@@ -656,7 +660,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<SessionRow>> {
              model,
              created_at     AS "created_at!",
              updated_at     AS "updated_at!"
-           FROM sessions ORDER BY updated_at DESC LIMIT 100"#,
+           FROM sessions ORDER BY updated_at DESC, rowid DESC LIMIT 100"#,
     )
     .fetch_all(pool)
     .await
@@ -922,6 +926,7 @@ cargo test --lib session    # 应 3 个测试全过
 ```
 
 特别留意 `delete_cascades_messages` —— 这个测试通过证明:
+
 1. C1 schema 的 `ON DELETE CASCADE` 写对
 2. `PRAGMA foreign_keys=ON` 真激活 cascade
 3. `db::session::delete` 不需要手动删 messages,db 自己处理
@@ -989,6 +994,11 @@ console.log('after cascade:', after);    // 应 []
 - **content 是 String** —— 前端发的时候要 `JSON.stringify`,接到再 `JSON.parse`。这是项目级约定
 - **stub 命令签名不一样** —— B3 stub 写的 `session_create(title: String)` 是 placeholder,C5 改成 `(input: SessionCreateInput)`,**整个文件覆盖**别 patch
 - **`session_update` 全 None 时刷 updated_at** —— 跟 `memory_update` 一致,符合"标记看过"语义
+- **`datetime('now')` 秒级精度 + ORDER BY 顺序未定义** ⚠️ 实测踩坑:
+  - 测试里两次 `create` 同秒完成 → `updated_at` 完全相同
+  - `ORDER BY updated_at DESC` 遇相等值时 SQLite 顺序未定义,实践中倾向按 `rowid` 升序,DESC 后反而"先创建的排前",`all[0].title` 是 `"first"` 而非 `"second"`
+  - **production 也会撞**:用户快速连点两次"新建会话"即触发
+  - **修法**:`ORDER BY updated_at DESC, rowid DESC`。`rowid` 是 SQLite 普通表的隐式自增列(= 插入顺序),作 tiebreaker 让后插入的排前,语义上"最近优先"更准。`memory::list` 同样要改
 
 ---
 

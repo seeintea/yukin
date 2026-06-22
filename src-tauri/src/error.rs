@@ -26,6 +26,8 @@ pub enum AppError {
     Tauri(#[from] tauri::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("join: {0}")]
+    Join(#[from] tokio::task::JoinError),
     #[error("{0}")]
     Other(String),
 }
@@ -50,6 +52,7 @@ impl serde::Serialize for AppError {
             AppError::Migrate(_) => "migrate",
             AppError::Tauri(_) => "tauri",
             AppError::Json(_) => "json",
+            AppError::Join(_) => "join",
             AppError::Other(_) => "other",
         };
         let mut s = serializer.serialize_struct("AppError", 2)?;
