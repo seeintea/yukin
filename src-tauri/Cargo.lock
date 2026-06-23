@@ -6480,6 +6480,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-sql",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",

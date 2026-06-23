@@ -1,18 +1,6 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "#/components/ui/button";
-
-interface MemoryRow {
-  id: string;
-  name: string;
-  kind: string;
-  description: string | null;
-  content: string;
-  metadata: string;
-  workspace: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+import { tauri } from "#/utils/tauri";
 
 interface SmokeStep {
   label: string;
@@ -21,161 +9,245 @@ interface SmokeStep {
 }
 
 export function SettingsScreen() {
-  const [steps, setSteps] = useState<SmokeStep[]>([]);
-  const [running, setRunning] = useState(false);
+  const [memorySteps, setMemorySteps] = useState<SmokeStep[]>([]);
+  const [memoryRunning, setMemoryRunning] = useState(false);
+
+  const [keychainSteps, setKeychainSteps] = useState<SmokeStep[]>([]);
+  const [keychainRunning, setKeychainRunning] = useState(false);
+
+  const [sessionSteps, setSessionSteps] = useState<SmokeStep[]>([]);
+  const [sessionRunning, setSessionRunning] = useState(false);
+
+  const [workspaceSteps, setWorkspaceSteps] = useState<SmokeStep[]>([]);
+  const [workspaceRunning, setWorkspaceRunning] = useState(false);
+
+  const [fsSteps, setFsSteps] = useState<SmokeStep[]>([]);
+  const [fsRunning, setFsRunning] = useState(false);
 
   async function runMemorySmokeTest() {
-    setRunning(true);
-    setSteps([]);
+    setMemoryRunning(true);
+    setMemorySteps([]);
     const log = (label: string, ok: boolean, data: unknown) =>
-      setSteps((prev) => [...prev, { label, ok, data }]);
+      setMemorySteps((p) => [...p, { label, ok, data }]);
 
     try {
-      // 1. save
-      const saved = await invoke<MemoryRow>("memory_save", {
-        input: {
-          name: "smoke-test",
-          kind: "user",
-          content: "Hello memory layer!",
-          metadata: { source: "settings-smoke-test" },
-        },
+      const saved = await tauri.memory.save({
+        name: "smoke-test",
+        kind: "user",
+        content: "Hello memory layer!",
+        metadata: { source: "settings-smoke-test" },
       });
-      log("memory_save", true, saved);
+      log("memory.save", true, saved);
 
-      // 2. recall (should hit)
-      const hits1 = await invoke<MemoryRow[]>("memory_recall", {
-        query: "Hello",
-      });
-      log(
-        `memory_recall("Hello") → ${hits1.length} hit(s)`,
-        hits1.length === 1,
-        hits1,
-      );
+      const hits1 = await tauri.memory.recall("Hello");
+      log(`memory.recall("Hello") → ${hits1.length} hit(s)`, hits1.length === 1, hits1);
 
-      // 3. list (should contain saved)
-      const all = await invoke<MemoryRow[]>("memory_list", {});
+      const all = await tauri.memory.list();
       const inList = all.some((m) => m.id === saved.id);
-      log(
-        `memory_list → ${all.length} total, contains saved: ${inList}`,
-        inList,
-        all,
-      );
+      log(`memory.list → ${all.length} total, contains saved: ${inList}`, inList, all);
 
-      // 4. update (change content)
-      const updated = await invoke<MemoryRow>("memory_update", {
-        id: saved.id,
-        patch: { content: "Hello updated content" },
+      const updated = await tauri.memory.update(saved.id, {
+        content: "Hello updated content",
       });
       log(
-        "memory_update content → 'Hello updated content'",
+        "memory.update content",
         updated.content === "Hello updated content",
         updated,
       );
 
-      // 5. recall new content (should hit)
-      const hits2 = await invoke<MemoryRow[]>("memory_recall", {
-        query: "updated",
-      });
-      log(
-        `memory_recall("updated") → ${hits2.length} hit(s)`,
-        hits2.length === 1,
-        hits2,
-      );
+      const hits2 = await tauri.memory.recall("updated");
+      log(`memory.recall("updated") → ${hits2.length} hit(s)`, hits2.length === 1, hits2);
 
-      // 6. delete
-      await invoke("memory_delete", { id: saved.id });
-      log("memory_delete", true, null);
+      await tauri.memory.delete(saved.id);
+      log("memory.delete", true, null);
 
-      // 7. recall after delete (should miss → verifies DELETE trigger)
-      const hits3 = await invoke<MemoryRow[]>("memory_recall", {
-        query: "updated",
-      });
+      const hits3 = await tauri.memory.recall("updated");
       log(
-        `memory_recall after delete → ${hits3.length} hit(s) (DELETE trigger verified: ${hits3.length === 0})`,
+        `memory.recall after delete → ${hits3.length} hit(s) (DELETE trigger verified: ${hits3.length === 0})`,
         hits3.length === 0,
         hits3,
       );
     } catch (err) {
       log("ERROR", false, err);
     } finally {
-      setRunning(false);
+      setMemoryRunning(false);
     }
   }
 
-  async function keychain() {
-    // 设
-    const ret = await invoke("key_set", {
-      provider: "anthropic",
-      key: "sk-ant-test-DELETE-ME",
-    });
+  async function runKeychainSmokeTest() {
+    setKeychainRunning(true);
+    setKeychainSteps([]);
+    const log = (label: string, ok: boolean, data: unknown) =>
+      setKeychainSteps((p) => [...p, { label, ok, data }]);
 
-    console.log(ret);
+    try {
+      await tauri.key.set("anthropic", "sk-ant-test-DELETE-ME");
+      log("key.set anthropic", true, null);
 
-    // 列
-    const vec = await invoke("key_list_providers"); // ['anthropic']
-    console.log(vec);
+      const list1 = await tauri.key.listProviders();
+      log(
+        `key.listProviders → [${list1.join(", ")}]`,
+        list1.includes("anthropic"),
+        list1,
+      );
 
-    // 验
-    await invoke("key_exists", { provider: "anthropic" }); // true
-    await invoke("key_exists", { provider: "openai" }); // false
+      const e1 = await tauri.key.exists("anthropic");
+      const e2 = await tauri.key.exists("openai");
+      log(
+        `key.exists anthropic=${e1}, openai=${e2}`,
+        e1 === true && e2 === false,
+        { anthropic: e1, openai: e2 },
+      );
 
-    // macOS:打开 Keychain Access, 搜 'xyz.yukin.agent', 应该看到一条 anthropic
+      await tauri.key.delete("anthropic");
+      log("key.delete anthropic", true, null);
 
-    // 删
-    await invoke("key_delete", { provider: "anthropic" });
-
-    await invoke("key_list_providers"); // []
-    await invoke("key_exists", { provider: "anthropic" }); // false
+      const list2 = await tauri.key.listProviders();
+      const e3 = await tauri.key.exists("anthropic");
+      log(
+        `after delete: listProviders=[${list2.join(", ")}], exists=${e3}`,
+        list2.length === 0 && e3 === false,
+        { list: list2, exists: e3 },
+      );
+    } catch (err) {
+      log("ERROR", false, err);
+    } finally {
+      setKeychainRunning(false);
+    }
   }
 
-  async function session() {
-    // 1. 创建会话
-    const s = (await invoke("session_create", {
-      input: {
-        title: "My first chat",
-        workspacePath: "/tmp/yukin-test",
+  async function runSessionSmokeTest() {
+    setSessionRunning(true);
+    setSessionSteps([]);
+    const log = (label: string, ok: boolean, data: unknown) =>
+      setSessionSteps((p) => [...p, { label, ok, data }]);
+
+    try {
+      const s = await tauri.session.create({
+        title: "Smoke test chat",
         provider: "anthropic",
         model: "claude-sonnet-4-6",
-      },
-    })) as Record<string, string>;
-    console.log("session:", s);
+      });
+      log("session.create", true, s);
 
-    // 2. append 几条消息
-    await invoke("session_append_message", {
-      input: {
+      await tauri.session.appendMessage({
         sessionId: s.id,
         role: "user",
         content: JSON.stringify([{ type: "text", text: "Hi" }]),
-      },
-    });
-    await invoke("session_append_message", {
-      input: {
+      });
+      await tauri.session.appendMessage({
         sessionId: s.id,
         role: "assistant",
         content: JSON.stringify([{ type: "text", text: "Hello" }]),
-      },
-    });
+      });
+      log("session.appendMessage ×2", true, null);
 
-    // 3. load messages
-    const msgs = await invoke("session_load_messages", { sessionId: s.id });
-    console.log("messages:", msgs); // 应 2 条
+      const msgs = await tauri.session.loadMessages(s.id);
+      log(`session.loadMessages → ${msgs.length} msgs`, msgs.length === 2, msgs);
 
-    // 4. update title
-    const updated = await invoke("session_update", {
-      id: s.id,
-      patch: { title: "Renamed chat" },
-    });
-    console.log("updated:", updated);
+      const updated = await tauri.session.update(s.id, { title: "Renamed" });
+      log("session.update title → 'Renamed'", updated.title === "Renamed", updated);
 
-    // 5. list
-    const all = await invoke("session_list");
-    console.log("list:", all);
+      const all = await tauri.session.list();
+      log(`session.list → ${all.length} total`, all.some((x) => x.id === s.id), all);
 
-    // 6. delete (cascade)
-    await invoke("session_delete", { id: s.id });
+      await tauri.session.delete(s.id);
+      const after = await tauri.session.loadMessages(s.id);
+      log(
+        `after delete: loadMessages → ${after.length} (cascade verified: ${after.length === 0})`,
+        after.length === 0,
+        after,
+      );
+    } catch (err) {
+      log("ERROR", false, err);
+    } finally {
+      setSessionRunning(false);
+    }
+  }
 
-    const after = await invoke("session_load_messages", { sessionId: s.id });
-    console.log("after cascade:", after); // 应 []
+  async function runWorkspaceTest() {
+    setWorkspaceRunning(true);
+    setWorkspaceSteps([]);
+    const log = (label: string, ok: boolean, data: unknown) =>
+      setWorkspaceSteps((p) => [...p, { label, ok, data }]);
+
+    try {
+      const current = await tauri.workspace.get();
+      log(`workspace.get → ${current ?? "<unset>"}`, true, current);
+
+      const picked = await tauri.workspace.select();
+      log(`workspace.select → ${picked}`, true, picked);
+
+      const reloaded = await tauri.workspace.get();
+      log(
+        `workspace.get after select → ${reloaded ?? "<unset>"}`,
+        reloaded === picked,
+        reloaded,
+      );
+    } catch (err) {
+      log("ERROR (dialog cancelled is also expected here)", false, err);
+    } finally {
+      setWorkspaceRunning(false);
+    }
+  }
+
+  async function runFsSmokeTest() {
+    setFsRunning(true);
+    setFsSteps([]);
+    const log = (label: string, ok: boolean, data: unknown) =>
+      setFsSteps((p) => [...p, { label, ok, data }]);
+
+    try {
+      const wsp = await tauri.workspace.get();
+      log(`workspace.get → ${wsp ?? "<unset>"}`, !!wsp, wsp);
+      if (!wsp) {
+        log("workspace not set — run 'Pick workspace' first", false, null);
+        return;
+      }
+
+      const testFile = "yukin-fs-smoke.txt";
+      const testContent = "hello fs layer!";
+
+      await tauri.fs.write(testFile, testContent);
+      log(`fs.write ${testFile}`, true, null);
+
+      const exists = await tauri.fs.exists(testFile);
+      log(`fs.exists ${testFile} → ${exists}`, exists === true, exists);
+
+      const read = await tauri.fs.read(testFile);
+      log(
+        `fs.read ${testFile} → ${read.content.length} bytes`,
+        read.content === testContent,
+        read,
+      );
+
+      await tauri.fs.edit(testFile, "fs layer", "fs LAYER");
+      const edited = await tauri.fs.read(testFile);
+      log(
+        `fs.edit replace → ${edited.content}`,
+        edited.content === "hello fs LAYER!",
+        edited,
+      );
+
+      const dir = await tauri.fs.listDir(".");
+      const found = dir.some((e) => e.name === testFile);
+      log(`fs.listDir . → ${dir.length} entries, contains ${testFile}: ${found}`, found, dir);
+
+      const globHits = await tauri.fs.glob("**/yukin-fs-smoke*");
+      log(`fs.glob → ${globHits.length} match(es)`, globHits.length > 0, globHits);
+
+      // Path safety check: traversal must be rejected
+      try {
+        await tauri.fs.read("../../etc/passwd");
+        log("fs.read ../../etc/passwd UNEXPECTEDLY succeeded ⚠️", false, null);
+      } catch (e) {
+        log("fs.read ../../etc/passwd rejected (path_safety verified)", true, e);
+      }
+    } catch (err) {
+      log("ERROR", false, err);
+    } finally {
+      setFsRunning(false);
+    }
   }
 
   return (
@@ -183,76 +255,110 @@ export function SettingsScreen() {
       <header>
         <h2 className="text-2xl font-semibold">Settings</h2>
         <p className="text-sm text-muted-foreground">
-          Configure your workspace, provider, and API key.
+          Smoke-test panel for all backend command groups. Each section runs the
+          full IPC + Rust + storage chain end-to-end.
         </p>
       </header>
 
-      <Button size="sm" onClick={keychain}>
-        keychain 测试
-      </Button>
+      <SmokeSection
+        title="Workspace"
+        description="get_workspace / select_workspace (opens native folder picker)."
+        buttonLabel={workspaceRunning ? "Running..." : "Pick workspace"}
+        onRun={runWorkspaceTest}
+        running={workspaceRunning}
+        steps={workspaceSteps}
+      />
 
-      <Button size="sm" onClick={session}>
-        session 测试
-      </Button>
+      <SmokeSection
+        title="Filesystem"
+        description="write → exists → read → edit → list_dir → glob → traversal rejection. Requires a workspace to be picked first."
+        buttonLabel={fsRunning ? "Running..." : "Run fs smoke test"}
+        onRun={runFsSmokeTest}
+        running={fsRunning}
+        steps={fsSteps}
+      />
 
-      <section className="space-y-2 rounded-lg border border-border p-4">
-        <h3 className="font-medium">Placeholder</h3>
-        <p className="text-sm text-muted-foreground">
-          Workspace selector, API key form, and provider picker will live here
-          (Phase D + E).
-        </p>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={async () => {
-            console.log("test---------");
-            await invoke("get_workspace").catch((error) => {
-              console.log(error);
-            });
-          }}
-        >
-          Coming soon
-        </Button>
-      </section>
+      <SmokeSection
+        title="Memory layer"
+        description="save → recall → list → update → recall → delete → recall (verifies FTS5 INSERT/UPDATE/DELETE triggers)."
+        buttonLabel={memoryRunning ? "Running..." : "Run memory smoke test"}
+        onRun={runMemorySmokeTest}
+        running={memoryRunning}
+        steps={memorySteps}
+      />
 
-      <section className="space-y-3 rounded-lg border border-border p-4">
-        <div>
-          <h3 className="font-medium">Memory layer smoke test</h3>
-          <p className="text-sm text-muted-foreground">
-            Runs save → recall → list → update → recall → delete → recall to
-            verify the full Phase C3 pipeline (FTS5 INSERT/UPDATE/DELETE
-            triggers included).
-          </p>
-        </div>
-        <Button size="sm" onClick={runMemorySmokeTest} disabled={running}>
-          {running ? "Running..." : "Run memory smoke test"}
-        </Button>
+      <SmokeSection
+        title="Keychain"
+        description="key_set → list_providers → key_exists → key_delete (verifies OS Keychain integration; check Keychain Access for xyz.yukin.agent)."
+        buttonLabel={keychainRunning ? "Running..." : "Run keychain smoke test"}
+        onRun={runKeychainSmokeTest}
+        running={keychainRunning}
+        steps={keychainSteps}
+      />
 
-        {steps.length > 0 && (
-          <ol className="space-y-2 text-sm">
-            {steps.map((s, i) => (
-              <li
-                key={i}
-                className={`rounded border px-3 py-2 ${
-                  s.ok
-                    ? "border-green-500/40 bg-green-500/5"
-                    : "border-red-500/40 bg-red-500/5"
-                }`}
-              >
-                <div className="flex items-center gap-2 font-mono text-xs">
-                  <span>{s.ok ? "✓" : "✗"}</span>
-                  <span>
-                    {i + 1}. {s.label}
-                  </span>
-                </div>
-                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/30 p-2 font-mono text-xs">
-                  {JSON.stringify(s.data, null, 2)}
-                </pre>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <SmokeSection
+        title="Sessions"
+        description="create → append × 2 → load → update → list → delete (verifies ON DELETE CASCADE for messages)."
+        buttonLabel={sessionRunning ? "Running..." : "Run session smoke test"}
+        onRun={runSessionSmokeTest}
+        running={sessionRunning}
+        steps={sessionSteps}
+      />
     </div>
+  );
+}
+
+interface SmokeSectionProps {
+  title: string;
+  description: string;
+  buttonLabel: string;
+  onRun: () => void;
+  running: boolean;
+  steps: SmokeStep[];
+}
+
+function SmokeSection({
+  title,
+  description,
+  buttonLabel,
+  onRun,
+  running,
+  steps,
+}: SmokeSectionProps) {
+  return (
+    <section className="space-y-3 rounded-lg border border-border p-4">
+      <div>
+        <h3 className="font-medium">{title}</h3>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <Button size="sm" onClick={onRun} disabled={running}>
+        {buttonLabel}
+      </Button>
+
+      {steps.length > 0 && (
+        <ol className="space-y-2 text-sm">
+          {steps.map((s, i) => (
+            <li
+              key={i}
+              className={`rounded border px-3 py-2 ${
+                s.ok
+                  ? "border-green-500/40 bg-green-500/5"
+                  : "border-red-500/40 bg-red-500/5"
+              }`}
+            >
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span>{s.ok ? "✓" : "✗"}</span>
+                <span>
+                  {i + 1}. {s.label}
+                </span>
+              </div>
+              <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/30 p-2 font-mono text-xs">
+                {JSON.stringify(s.data, null, 2)}
+              </pre>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
