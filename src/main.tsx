@@ -1,12 +1,18 @@
-import React from "react";
-import { createRoot } from "react-dom/client";
-import { Routes } from "./routes";
+import ReactDOM from "react-dom/client";
+import { RouterProvider, createRouter } from "@tanstack/react-router";
+import { routeTree } from "./routeTree.gen";
+
 import "./index.css";
 
-const root = document.getElementById("root") as HTMLElement;
+const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  scrollRestoration: true,
+});
 
-createRoot(root).render(
-  <React.StrictMode>
-    <Routes />
-  </React.StrictMode>,
-);
+const rootElement = document.getElementById("app")!;
+
+if (!rootElement.innerHTML) {
+  const root = ReactDOM.createRoot(rootElement);
+  root.render(<RouterProvider router={router} />);
+}

@@ -1,4 +1,7 @@
 {
+  "files.watcherExclude": { "**/routeTree.gen.ts": true },
+  "search.exclude": { "**/routeTree.gen.ts": true },
+  "files.readonlyInclude": { "**/routeTree.gen.ts": true },
   "cSpell.words": [
     "cdylib",
     "rlib",
@@ -6,6 +9,16 @@
     "shiki",
     "staticlib",
     "tauri",
-    "yukin"
+    "yukin",
+    "oxlint",
+    "oxfmt",
+    "oklch",
+    "lightningcss"
   ],
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "[javascript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[javascriptreact]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[typescript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[json]": { "editor.defaultFormatter": "oxc.oxc-vscode" }
 }
