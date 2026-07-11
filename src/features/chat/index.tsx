@@ -24,6 +24,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "#/components/ui/dialog";
+import { streamDeepSeek } from "#/agent/providers/deep-seek";
 
 export function Chat() {
   const providerId = useId();
@@ -31,7 +32,9 @@ export function Chat() {
   const modalProviderId = useId();
 
   function onSubmit(data: z.infer<typeof formSchema>) {
-    console.log(data);
+    streamDeepSeek(data.baseUrl, data.key, [
+      { role: "system", content: "You are a helpful assistant." },
+    ]);
   }
 
   return (
