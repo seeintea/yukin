@@ -4,31 +4,45 @@ export async function* parseSse(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let dataLines: string[] = [];
 
   while (true) {
     const { done, value } = await reader.read();
 
-    if (done) break;
+    buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
 
-    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex = buffer.indexOf("\n");
 
-    /**
-     * 接收到的原始数据
-     *
-     * data: {"id":"3f4410e3-64fc-4adc-a15c-aa90ffc5af83","object":"chat.completion.chunk","created":1783825304,"model":"deepseek-v4-pro","system_fingerprint":"fp_9954b31ca7_prod0820_fp8_kvcache_20260402","choices":[{"index":0,"delta":{"content":null,"reasoning_content":":"},"logprobs":null,"finish_reason":null}]}
-     *
-     *
-     * data: {"id":"3f4410e3-64fc-4adc-a15c-aa90ffc5af83","object":"chat.completion.chunk","created":1783825304,"model":"deepseek-v4-pro","system_fingerprint":"fp_9954b31ca7_prod0820_fp8_kvcache_20260402","choices":[{"index":0,"delta":{"content":null,"reasoning_content":"1"},"logprobs":null,"finish_reason":null}]}
-     */
-    const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() ?? "";
+    while (newlineIndex !== -1) {
+      let line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
 
-    for (const block of blocks) {
-      // 移除 fetch 返回的 `data: `
-      // 之后的数据可以被完美 JSON.parse
-      if (block.startsWith("data: ")) {
-        yield block.slice(6);
+      if (line.endsWith("\r")) {
+        line = line.slice(0, -1);
       }
+
+      if (line === "") {
+        if (dataLines.length > 0) {
+          yield dataLines.join("\n");
+          dataLines = [];
+        }
+      } else if (!line.startsWith(":")) {
+        if (line === "data") {
+          dataLines.push("");
+        } else if (line.startsWith("data:")) {
+          let data = line.slice(5);
+
+          if (data.startsWith(" ")) {
+            data = data.slice(1);
+          }
+
+          dataLines.push(data);
+        }
+      }
+
+      newlineIndex = buffer.indexOf("\n");
     }
+
+    if (done) break;
   }
 }
