@@ -13,7 +13,7 @@ import {
   formSchema,
   type ProviderFormRef,
 } from "#/components/provider-form";
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import {
   Dialog,
   DialogClose,
@@ -30,15 +30,19 @@ export function Chat() {
   const providerId = useId();
   const providerRef = useRef<ProviderFormRef>({ reset: () => {} });
   const modalProviderId = useId();
+  const [content, setContent] = useState("");
 
-  function onSubmit(data: z.infer<typeof formSchema>) {
-    streamDeepSeek(data.baseUrl, data.key, [
-      { role: "system", content: "You are a helpful assistant." },
-    ]);
+  async function onSubmit(data: z.infer<typeof formSchema>) {
+    setContent("");
+    for await (const delta of streamDeepSeek(data.baseUrl, data.key, [
+      { role: "user", content: "你好，请介绍一下自己" },
+    ])) {
+      setContent((current) => current + delta);
+    }
   }
 
   return (
-    <div className={"flex items-center justify-center gap-4"}>
+    <div className={"flex items-center flex-col justify-center gap-4"}>
       <Card className={"w-lg"}>
         <CardHeader>
           <CardTitle>Agent 创建</CardTitle>
@@ -78,6 +82,10 @@ export function Chat() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Card className={"w-lg"}>
+        <CardHeader>Agent 输出</CardHeader>
+        <CardContent>{content}</CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,4 +1,6 @@
-export async function streamDeepSeek(
+import { parseSse } from "../transport/sse";
+
+export async function* streamDeepSeek(
   url: string,
   key: string,
   messages: { role: string; content: string }[],
@@ -12,7 +14,8 @@ export async function streamDeepSeek(
     body: JSON.stringify({
       messages,
       model: "deepseek-v4-pro",
-      thinking: { type: "enabled" },
+      // thinking: { type: "enabled" },
+      thinking: { type: "disabled" }, // 暂时关闭思考模式
       reasoning_effort: "high",
       stream: true,
     }),
@@ -27,17 +30,15 @@ export async function streamDeepSeek(
     throw new Error("DeepSeek 没有返回响应流");
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+  for await (const data of parseSse(response.body)) {
+    if (data === "[DONE]") break;
 
-  while (true) {
-    const { done, value } = await reader.read();
+    const payload = JSON.parse(data);
 
-    if (done) {
-      break;
+    const content = payload.choices[0]?.delta?.content;
+
+    if (content) {
+      yield content;
     }
-
-    const chunk = decoder.decode(value, { stream: true });
-    console.log("raw chunk:", JSON.stringify(chunk));
   }
 }
