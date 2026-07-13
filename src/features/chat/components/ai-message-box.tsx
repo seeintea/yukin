@@ -1,4 +1,3 @@
-import { PropsWithChildren } from "react";
 import { Avatar, AvatarFallback } from "#/components/ui/avatar";
 import { Bubble, BubbleContent } from "#/components/ui/bubble";
 import {
@@ -6,8 +5,13 @@ import {
   MessageAvatar,
   MessageContent,
 } from "#/components/ui/message";
+import { MarkdownMessage } from "./markdown-message";
 
-export function AIMessageBox(props: PropsWithChildren) {
+interface AIMessageBoxProps {
+  children: string;
+}
+
+export function AIMessageBox({ children }: AIMessageBoxProps) {
   return (
     <Message>
       <MessageAvatar>
@@ -17,7 +21,9 @@ export function AIMessageBox(props: PropsWithChildren) {
       </MessageAvatar>
       <MessageContent>
         <Bubble variant="muted" className={"max-w-sm"}>
-          <BubbleContent>{props.children}</BubbleContent>
+          <BubbleContent>
+            <MarkdownMessage>{children}</MarkdownMessage>
+          </BubbleContent>
         </Bubble>
       </MessageContent>
     </Message>
