@@ -1,5 +1,4 @@
 import { RefObject, useImperativeHandle, useRef } from "react";
-import * as z from "zod";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -17,6 +16,7 @@ import {
   SelectItem,
 } from "#/components/ui/select";
 import { Input } from "#/components/ui/input";
+import { providerInputSchema, type ProviderInput } from "#/domain/provider";
 
 import {
   apiRespFormat,
@@ -35,14 +35,6 @@ function getProviderDefaultQueryUrl(
   return providerDefaultQueryUrl[key];
 }
 
-export const formSchema = z.object({
-  provider: z.string().min(1, { message: "请选择供应商" }),
-  format: z.string().min(1, { message: "请选择兼容 API 格式" }),
-  providerAlias: z.string().min(1, { message: "请输入别名" }),
-  baseUrl: z.string().min(1, { message: "请输入请求地址" }),
-  key: z.string().min(1, { message: "请输入密钥" }),
-});
-
 export interface ProviderFormRef {
   reset: () => void;
 }
@@ -50,7 +42,7 @@ export interface ProviderFormRef {
 interface ProviderFormProps {
   id: string;
   ref?: RefObject<ProviderFormRef>;
-  onSubmit: (data: z.infer<typeof formSchema>) => void;
+  onSubmit: (data: ProviderInput) => void;
 }
 
 export function ProviderForm(props: ProviderFormProps) {
@@ -58,8 +50,8 @@ export function ProviderForm(props: ProviderFormProps) {
   const aliasManuallyEditedRef = useRef(false);
   const baseUrlManuallyEditedRef = useRef(false);
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<ProviderInput>({
+    resolver: zodResolver(providerInputSchema),
     defaultValues: {
       provider: "",
       format: "",
@@ -84,7 +76,7 @@ export function ProviderForm(props: ProviderFormProps) {
           name="provider"
           control={form.control}
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
+            <Field>
               <FieldLabel htmlFor={`${id}-provider`}>请选择供应商</FieldLabel>
               <Select
                 {...field}
@@ -140,7 +132,7 @@ export function ProviderForm(props: ProviderFormProps) {
           name="format"
           control={form.control}
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
+            <Field>
               <FieldLabel htmlFor={`${id}-format`}>
                 请选择兼容 API 格式
               </FieldLabel>
@@ -189,7 +181,7 @@ export function ProviderForm(props: ProviderFormProps) {
           name="providerAlias"
           control={form.control}
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
+            <Field>
               <FieldLabel htmlFor={`${id}-provider-alias`}>
                 请输入别名
               </FieldLabel>
@@ -213,7 +205,7 @@ export function ProviderForm(props: ProviderFormProps) {
           name="baseUrl"
           control={form.control}
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
+            <Field>
               <FieldLabel htmlFor={`${id}-base-url`}>请输入请求地址</FieldLabel>
               <Input
                 {...field}
@@ -235,7 +227,7 @@ export function ProviderForm(props: ProviderFormProps) {
           name="key"
           control={form.control}
           render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
+            <Field>
               <FieldLabel htmlFor={`${id}-key`}>请输入密钥</FieldLabel>
               <Input
                 {...field}

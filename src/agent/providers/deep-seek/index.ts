@@ -113,7 +113,7 @@ export async function* streamDeepSeek(
   let response: Response;
 
   try {
-    response = await fetch(`${url}/chat/completions`, {
+    response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
