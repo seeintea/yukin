@@ -109,6 +109,7 @@ export async function* streamDeepSeek(
   url: string,
   key: string,
   messages: { role: string; content: string }[],
+  signal?: AbortSignal,
 ): AsyncGenerator<DeepSeekStreamEvent> {
   let response: Response;
 
@@ -127,6 +128,7 @@ export async function* streamDeepSeek(
         reasoning_effort: "high",
         stream: true,
       }),
+      signal,
     });
   } catch {
     throw new DeepSeekError("REQUEST_FAILED", "DeepSeek 请求发送失败");
