@@ -1,5 +1,5 @@
 import type { ProviderOutput } from "#/domain/provider";
-import { ArrowUpIcon, SquareIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, SquareIcon } from "lucide-react";
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
@@ -19,6 +19,8 @@ import {
 import { UserMessageBox } from "./components/user-message-box";
 import { AIMessageBox } from "./components/ai-message-box";
 import { useAgent } from "#/hooks/use-agent";
+import { useChatScroll } from "#/hooks/use-chat-scroll";
+import { Button } from "#/components/ui/button";
 
 interface ChatScreenProps {
   providers: ProviderOutput[];
@@ -37,6 +39,14 @@ export function ChatScreen({ providers }: ChatScreenProps) {
     enqueueUserMessage,
     cancelActiveRun,
   } = useAgent(selectedProvider);
+  const {
+    containerRef,
+    isFollowing,
+    scrollToBottom,
+    handleScroll,
+    handleWheel,
+    handlePointerDown,
+  } = useChatScroll(messages);
   const providerItems = providers.map((provider) => ({
     label: provider.providerAlias,
     value: provider.id,
@@ -67,28 +77,54 @@ export function ChatScreen({ providers }: ChatScreenProps) {
     <div
       className={"h-full flex items-center flex-col justify-center gap-4 p-4"}
     >
-      <div className={"flex-1 flex flex-col gap-2 w-full overflow-y-auto"}>
-        {messages.map((message) =>
-          message.role === "user" ? (
-            <UserMessageBox key={message.id}>
-              {message.content.type === "text" ? message.content.text : ""}
-            </UserMessageBox>
-          ) : (
-            <div key={message.id}>
-              <AIMessageBox>
-                {(message.content.type === "text"
-                  ? message.content.text
-                  : `[交互消息：${message.content.name}]`) ||
-                  (message.status === "streaming" ? "正在思考…" : "未生成内容")}
-              </AIMessageBox>
-              {message.error && (
-                <p className="mt-1 text-xs text-destructive">{message.error}</p>
-              )}
-              {message.status === "cancelled" && (
-                <p className="mt-1 text-xs text-muted-foreground">已停止生成</p>
-              )}
-            </div>
-          ),
+      <div className="relative min-h-0 w-full flex-1">
+        <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          className="absolute inset-0 flex flex-col gap-2 overflow-y-auto"
+        >
+          {messages.map((message) =>
+            message.role === "user" ? (
+              <UserMessageBox key={message.id}>
+                {message.content.type === "text" ? message.content.text : ""}
+              </UserMessageBox>
+            ) : (
+              <div key={message.id}>
+                <AIMessageBox>
+                  {(message.content.type === "text"
+                    ? message.content.text
+                    : `[交互消息：${message.content.name}]`) ||
+                    (message.status === "streaming"
+                      ? "正在思考…"
+                      : "未生成内容")}
+                </AIMessageBox>
+                {message.error && (
+                  <p className="mt-1 text-xs text-destructive">
+                    {message.error}
+                  </p>
+                )}
+                {message.status === "cancelled" && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    已停止生成
+                  </p>
+                )}
+              </div>
+            ),
+          )}
+        </div>
+        {!isFollowing && (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={scrollToBottom}
+            className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-md"
+            aria-label="回到底部"
+          >
+            <ArrowDownIcon />
+          </Button>
         )}
       </div>
       <InputGroup>
