@@ -30,18 +30,24 @@ export function ChatScreen({ providers }: ChatScreenProps) {
   const selectedProvider = providers.find(
     (provider) => provider.id === providerId,
   );
-  const { messages, isRunning, sendMessage, stop } = useAgent(selectedProvider);
+  const {
+    messages,
+    activeRun,
+    pendingRuns,
+    enqueueUserMessage,
+    cancelActiveRun,
+  } = useAgent(selectedProvider);
   const providerItems = providers.map((provider) => ({
     label: provider.providerAlias,
     value: provider.id,
   }));
 
   function submit() {
-    if (!input.trim() || isRunning) return;
+    if (!input.trim()) return;
 
     const content = input;
     setInput("");
-    void sendMessage(content);
+    enqueueUserMessage(content);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -64,11 +70,15 @@ export function ChatScreen({ providers }: ChatScreenProps) {
       <div className={"flex-1 flex flex-col gap-2 w-full overflow-y-auto"}>
         {messages.map((message) =>
           message.role === "user" ? (
-            <UserMessageBox key={message.id}>{message.content}</UserMessageBox>
+            <UserMessageBox key={message.id}>
+              {message.content.type === "text" ? message.content.text : ""}
+            </UserMessageBox>
           ) : (
             <div key={message.id}>
               <AIMessageBox>
-                {message.content ||
+                {(message.content.type === "text"
+                  ? message.content.text
+                  : `[交互消息：${message.content.name}]`) ||
                   (message.status === "streaming" ? "正在思考…" : "未生成内容")}
               </AIMessageBox>
               {message.error && (
@@ -94,7 +104,7 @@ export function ChatScreen({ providers }: ChatScreenProps) {
             value={providerId}
             onValueChange={(value) => setProviderId(value ?? "")}
             items={providerItems}
-            disabled={isRunning}
+            disabled={activeRun !== null}
           >
             <SelectTrigger size="sm">
               <SelectValue placeholder="选择 Provider" />
@@ -109,16 +119,32 @@ export function ChatScreen({ providers }: ChatScreenProps) {
               </SelectGroup>
             </SelectContent>
           </Select>
+          {pendingRuns.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              等待中 {pendingRuns.length}
+            </span>
+          )}
+          {activeRun && (
+            <InputGroupButton
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              onClick={cancelActiveRun}
+              aria-label="停止生成"
+            >
+              <SquareIcon />
+            </InputGroupButton>
+          )}
           <InputGroupButton
             type="button"
             variant="default"
             size="icon-sm"
             className="ml-auto"
-            onClick={isRunning ? stop : submit}
-            disabled={!isRunning && (!input.trim() || !selectedProvider)}
-            aria-label={isRunning ? "停止生成" : "发送消息"}
+            onClick={submit}
+            disabled={!input.trim() || !selectedProvider}
+            aria-label={activeRun ? "加入等待队列" : "发送消息"}
           >
-            {isRunning ? <SquareIcon /> : <ArrowUpIcon />}
+            <ArrowUpIcon />
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
