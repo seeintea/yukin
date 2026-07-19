@@ -1,16 +1,14 @@
+import type { ProtocolErrorCode } from "../protocol/types";
+
 export type DeepSeekErrorCode =
   | "REQUEST_FAILED"
   | "HTTP_ERROR"
-  | "EMPTY_RESPONSE_BODY"
-  | "STREAM_READ_FAILED"
-  | "INVALID_STREAM_DATA"
-  | "API_ERROR"
-  | "INCOMPLETE_STREAM"
-  | "MISSING_FINISH_REASON";
+  | "UNSUPPORTED_FORMAT"
+  | ProtocolErrorCode;
 
 export class DeepSeekError extends Error {
   constructor(
-    public readonly code: DeepSeekErrorCode,
+    readonly code: DeepSeekErrorCode,
     message: string,
   ) {
     super(message);

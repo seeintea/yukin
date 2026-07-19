@@ -1,5 +1,9 @@
-import { streamDeepSeek, DeepSeekError } from "#/agent/providers/deep-seek";
-import type { DeepSeekFinishReason } from "#/agent/providers/deep-seek/types";
+import { DeepSeekError, DeepSeekProvider } from "#/agent/providers/deep-seek";
+import type {
+  ProviderApiFormat,
+  ProviderFinishReason,
+  ProviderMessage,
+} from "#/agent/providers/types";
 import type { ProviderOutput } from "#/domain/provider";
 import { nanoid } from "nanoid";
 import { useCallback, useEffect, useReducer, useRef } from "react";
@@ -24,7 +28,7 @@ export interface AgentMessage {
   content: AgentMessageContent;
   status: AgentMessageStatus;
   error: string | null;
-  finishReason: DeepSeekFinishReason | null;
+  finishReason: ProviderFinishReason | null;
   createdAt: number;
 }
 
@@ -73,7 +77,7 @@ type Action =
       status: TerminalRunStatus;
       completedAt: number;
       error?: string;
-      finishReason?: DeepSeekFinishReason;
+      finishReason?: ProviderFinishReason;
     }
   | { type: "append-completed"; run: AgentRun }
   | { type: "clear" };
@@ -216,7 +220,10 @@ function getRunMessages(run: AgentRun) {
  * 因此排队期间前序 Run 新产生的输出会被包含，后续 pending 输入不会提前混入。
  * synthetic / interaction / tool 默认只服务 UI，不直接发送给模型。
  */
-function buildRunContext(completedRuns: AgentRun[], activeRun: AgentRun) {
+function buildRunContext(
+  completedRuns: AgentRun[],
+  activeRun: AgentRun,
+): ProviderMessage[] {
   return [
     ...completedRuns.flatMap(getRunMessages),
     ...(activeRun.inputMessage ? [activeRun.inputMessage] : []),
@@ -230,8 +237,22 @@ function buildRunContext(completedRuns: AgentRun[], activeRun: AgentRun) {
     )
     .map((message) => ({
       role: message.role,
-      content: message.content.type === "text" ? message.content.text : "",
+      content: [
+        {
+          type: "text",
+          text: message.content.type === "text" ? message.content.text : "",
+        },
+      ],
     }));
+}
+
+function getProviderApiFormat(format: string): ProviderApiFormat {
+  if (format === "open-ai" || format === "anthropic") return format;
+
+  throw new DeepSeekError(
+    "UNSUPPORTED_FORMAT",
+    `不支持的 DeepSeek API 格式：${format}`,
+  );
 }
 
 export function useAgent(provider: ProviderOutput | undefined) {
@@ -391,23 +412,37 @@ export function useAgent(provider: ProviderOutput | undefined) {
       }
 
       try {
-        for await (const event of streamDeepSeek(
-          executionProvider.baseUrl,
-          executionProvider.key,
-          context,
-          controller.signal,
-        )) {
-          if (event.type === "content") {
-            queueContent(event.content);
-          } else {
-            flushContent();
-            dispatch({
-              type: "finish-active",
-              messageId: outputMessage.id,
-              status: "completed",
-              finishReason: event.reason,
-              completedAt: Date.now(),
-            });
+        const modelProvider = new DeepSeekProvider({
+          baseUrl: executionProvider.baseUrl,
+          apiKey: executionProvider.key,
+          format: getProviderApiFormat(executionProvider.format),
+        });
+
+        for await (const event of modelProvider.chat({
+          messages: context,
+          signal: controller.signal,
+        })) {
+          switch (event.type) {
+            case "text-delta":
+              queueContent(event.delta);
+              break;
+
+            case "finish":
+              flushContent();
+              dispatch({
+                type: "finish-active",
+                messageId: outputMessage.id,
+                status: "completed",
+                finishReason: event.reason,
+                completedAt: Date.now(),
+              });
+              break;
+
+            // thinking 当前被硬编码关闭；Tool Registry 也尚未接入。
+            // 先显式消费事件，后续 Agent loop 会在这里记录 reasoning 和执行工具。
+            case "reasoning-delta":
+            case "tool-call":
+              break;
           }
         }
       } catch (cause) {
