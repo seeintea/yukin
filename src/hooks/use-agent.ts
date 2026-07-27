@@ -1,4 +1,6 @@
 import { DeepSeekError, DeepSeekProvider } from "#/agent/providers/deep-seek";
+import { createMockMcpToolRegistry } from "#/agent/mcp/mock";
+import { runAgent } from "#/agent/run-agent";
 import type {
   ProviderApiFormat,
   ProviderFinishReason,
@@ -205,7 +207,7 @@ function getErrorMessage(cause: unknown): string {
     return `[${cause.code}] ${cause.message}`;
   }
 
-  return "发生未知错误";
+  return cause instanceof Error ? cause.message : "发生未知错误";
 }
 
 function getRunMessages(run: AgentRun) {
@@ -417,9 +419,12 @@ export function useAgent(provider: ProviderOutput | undefined) {
           apiKey: executionProvider.key,
           format: getProviderApiFormat(executionProvider.format),
         });
+        const toolRegistry = await createMockMcpToolRegistry(controller.signal);
 
-        for await (const event of modelProvider.chat({
+        for await (const event of runAgent({
+          provider: modelProvider,
           messages: context,
+          tools: toolRegistry,
           signal: controller.signal,
         })) {
           switch (event.type) {
@@ -438,8 +443,8 @@ export function useAgent(provider: ProviderOutput | undefined) {
               });
               break;
 
-            // thinking 当前被硬编码关闭；Tool Registry 也尚未接入。
-            // 先显式消费事件，后续 Agent loop 会在这里记录 reasoning 和执行工具。
+            // thinking 当前被硬编码关闭；Tool Call 由 runAgent 内部执行，
+            // UI 暂时只消费最终文本。
             case "reasoning-delta":
             case "tool-call":
               break;

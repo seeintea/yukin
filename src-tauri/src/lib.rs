@@ -73,6 +73,7 @@ pub fn run() {
             commands::session::session_load_messages,
             commands::agent::chat_send,
             commands::agent::chat_abort,
+            commands::browser::open_chrome,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
