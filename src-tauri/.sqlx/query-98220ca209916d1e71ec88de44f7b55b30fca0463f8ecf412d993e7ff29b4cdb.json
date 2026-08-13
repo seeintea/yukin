@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        SELECT id, provider_name, api_format, base_url, provider_alias,\n               api_key_alias, created_at, updated_at\n        FROM model_providers\n        WHERE id = ? AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "provider_name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "provider_name"
+          }
+        }
+      },
+      {
+        "name": "api_format",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "api_format"
+          }
+        }
+      },
+      {
+        "name": "base_url",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "base_url"
+          }
+        }
+      },
+      {
+        "name": "provider_alias",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "provider_alias"
+          }
+        }
+      },
+      {
+        "name": "api_key_alias",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "api_key_alias"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "model_providers",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "98220ca209916d1e71ec88de44f7b55b30fca0463f8ecf412d993e7ff29b4cdb"
+}

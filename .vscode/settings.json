@@ -11,7 +11,12 @@
     "oklch",
     "lightningcss",
     "oxfmt",
-    "oxlint"
+    "oxlint",
+    "sqlx",
+    "strftime",
+    "nocase",
+    "chrono",
+    "thiserror"
   ],
   "files.readonlyInclude": {
     "**/routeTree.gen.ts": true
