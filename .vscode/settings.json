@@ -9,6 +9,19 @@
     "yukin",
     "yukkuri",
     "oklch",
-    "lightningcss"
-  ]
+    "lightningcss",
+    "oxfmt",
+    "oxlint"
+  ],
+  "files.readonlyInclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "files.watcherExclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "search.exclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "prettier.enable": false,
+  "oxc.enable": true,
 }
