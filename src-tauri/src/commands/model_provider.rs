@@ -1,14 +1,20 @@
 use tauri::State;
 
 use crate::{
+    model_provider::catalog,
     protocol::model_provider::{
-        CreateRequest, DeleteRequest, FindRequest, ModelProvider, ReplaceCredentialRequest,
-        UpdateRequest,
+        CreateRequest, DeleteRequest, FindRequest, ModelProvider, ModelProviderPreset,
+        ReplaceCredentialRequest, UpdateRequest,
     },
     storage::model_provider::{self, UpdateParams},
     workflows::model_provider as model_provider_workflow,
     AppResult, AppState,
 };
+
+#[tauri::command]
+pub fn model_provider_preset_list() -> Vec<ModelProviderPreset> {
+    catalog::model_provider_presets()
+}
 
 #[tauri::command]
 pub async fn model_provider_create(

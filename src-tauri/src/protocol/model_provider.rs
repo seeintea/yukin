@@ -33,6 +33,28 @@ impl TryFrom<String> for ApiFormat {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ModelPreset {
+    pub model_id: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionPreset {
+    pub api_format: ApiFormat,
+    pub base_url: String,
+    pub models: Vec<ModelPreset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderPreset {
+    pub provider_name: String,
+    pub connections: Vec<ConnectionPreset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelProvider {
     pub id: String,
     pub provider_name: String,

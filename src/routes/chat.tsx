@@ -1,15 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { Button } from "#/shadcn/button";
+import { Chat } from "#/features/chat";
 
 export const Route = createFileRoute("/chat")({
-  component: Index,
+  component: Chat,
 });
-
-function Index() {
-  return (
-    <div className="p-2">
-      <Button>123</Button>
-    </div>
-  );
-}

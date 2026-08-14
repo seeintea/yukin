@@ -1,9 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/initialize")({
-  component: RouteComponent,
-});
+import { Initialize } from "#/features/initialize";
 
-function RouteComponent() {
-  return <div>Hello "/initialize"!</div>;
-}
+export const Route = createFileRoute("/initialize")({
+  component: Initialize,
+});

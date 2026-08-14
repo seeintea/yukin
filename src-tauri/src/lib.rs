@@ -1,6 +1,7 @@
 mod commands;
 mod diagnostics;
 mod error;
+mod model_provider;
 mod protocol;
 mod security;
 mod state;
@@ -28,6 +29,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,
             commands::model_provider::model_provider_list,
