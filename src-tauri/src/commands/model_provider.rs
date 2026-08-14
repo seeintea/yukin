@@ -2,8 +2,7 @@ use tauri::State;
 
 use crate::{
     protocol::model_provider::{
-        CreateModelProviderInput, DeleteModelProviderInput, GetModelProviderInput,
-        ListModelProvidersInput, ModelProvider, UpdateModelProviderInput,
+        CreateRequest, DeleteRequest, FindRequest, ModelProvider, UpdateRequest,
     },
     storage::model_provider,
     AppResult, AppState,
@@ -12,39 +11,36 @@ use crate::{
 #[tauri::command]
 pub async fn model_provider_create(
     state: State<'_, AppState>,
-    input: CreateModelProviderInput,
+    request: CreateRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider::create(state.db(), input).await
+    model_provider::create(state.db(), request).await
 }
 
 #[tauri::command]
-pub async fn model_provider_get(
+pub async fn model_provider_find(
     state: State<'_, AppState>,
-    input: GetModelProviderInput,
+    request: FindRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider::get(state.db(), &input.id).await
+    model_provider::find(state.db(), &request.id).await
 }
 
 #[tauri::command]
-pub async fn model_provider_list(
-    state: State<'_, AppState>,
-    input: ListModelProvidersInput,
-) -> AppResult<Vec<ModelProvider>> {
-    model_provider::list(state.db(), input.include_deleted).await
+pub async fn model_provider_list(state: State<'_, AppState>) -> AppResult<Vec<ModelProvider>> {
+    model_provider::list(state.db()).await
 }
 
 #[tauri::command]
 pub async fn model_provider_update(
     state: State<'_, AppState>,
-    input: UpdateModelProviderInput,
+    request: UpdateRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider::update(state.db(), input).await
+    model_provider::update(state.db(), request).await
 }
 
 #[tauri::command]
 pub async fn model_provider_delete(
     state: State<'_, AppState>,
-    input: DeleteModelProviderInput,
+    request: DeleteRequest,
 ) -> AppResult<()> {
-    model_provider::delete(state.db(), &input.id).await
+    model_provider::delete(state.db(), &request.id).await
 }

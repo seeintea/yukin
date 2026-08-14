@@ -3,15 +3,13 @@ use uuid::Uuid;
 
 use crate::{
     protocol::{
-        common::RecordTimestamps,
-        model_provider::{
-            ApiFormat, CreateModelProviderInput, ModelProvider, UpdateModelProviderInput,
-        },
+        common::RecordMetadata,
+        model_provider::{ApiFormat, CreateRequest, ModelProvider, UpdateRequest},
     },
     AppError, AppResult,
 };
 
-struct ModelProviderRow {
+struct ModelProviderRecord {
     id: String,
     provider_name: String,
     api_format: String,
@@ -22,32 +20,31 @@ struct ModelProviderRow {
     updated_at: String,
 }
 
-impl TryFrom<ModelProviderRow> for ModelProvider {
+impl TryFrom<ModelProviderRecord> for ModelProvider {
     type Error = AppError;
 
-    fn try_from(row: ModelProviderRow) -> Result<Self, Self::Error> {
+    fn try_from(record: ModelProviderRecord) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: row.id,
-            provider_name: row.provider_name,
-            api_format: ApiFormat::try_from(row.api_format).map_err(AppError::Other)?,
-            base_url: row.base_url,
-            provider_alias: row.provider_alias,
-            api_key_alias: row.api_key_alias,
-            timestamps: RecordTimestamps {
-                created_at: row.created_at,
-                updated_at: row.updated_at,
+            id: record.id,
+            provider_name: record.provider_name,
+            api_format: ApiFormat::try_from(record.api_format).map_err(AppError::Other)?,
+            base_url: record.base_url,
+            provider_alias: record.provider_alias,
+            api_key_alias: record.api_key_alias,
+            metadata: RecordMetadata {
+                created_at: record.created_at,
+                updated_at: record.updated_at,
             },
         })
     }
 }
 
-pub async fn create(
-    pool: &SqlitePool,
-    input: CreateModelProviderInput,
-) -> AppResult<ModelProvider> {
+pub async fn create(pool: &SqlitePool, request: CreateRequest) -> AppResult<ModelProvider> {
     let id = Uuid::now_v7().to_string();
-    let row = sqlx::query_as!(
-        ModelProviderRow,
+    // TODO save API KEY safety
+    let api_key_alias = request.api_key;
+    let record = sqlx::query_as!(
+        ModelProviderRecord,
         r#"
         INSERT INTO model_providers (
             id, provider_name, api_format, base_url, provider_alias, api_key_alias
@@ -56,22 +53,22 @@ pub async fn create(
                   api_key_alias, created_at, updated_at
         "#,
         id,
-        input.provider_name,
-        input.api_format.as_str(),
-        input.base_url,
-        input.provider_alias,
-        input.api_key_alias,
+        request.provider_name,
+        request.api_format.as_str(),
+        request.base_url,
+        request.provider_alias,
+        api_key_alias
     )
     .fetch_one(pool)
     .await?;
 
-    tracing::info!(provider_id = %row.id, "model provider created");
-    row.try_into()
+    tracing::info!(provider_id = %&record.id, "model provider created");
+    record.try_into()
 }
 
-pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<ModelProvider> {
-    let row = sqlx::query_as!(
-        ModelProviderRow,
+pub async fn find(pool: &SqlitePool, id: &str) -> AppResult<ModelProvider> {
+    let record = sqlx::query_as!(
+        ModelProviderRecord,
         r#"
         SELECT id, provider_name, api_format, base_url, provider_alias,
                api_key_alias, created_at, updated_at
@@ -83,53 +80,37 @@ pub async fn get(pool: &SqlitePool, id: &str) -> AppResult<ModelProvider> {
     .fetch_one(pool)
     .await?;
 
-    tracing::info!(provider_id = %row.id, "model provider loaded");
-    row.try_into()
+    tracing::info!(provider_id = %record.id, "model provider loaded");
+    record.try_into()
 }
 
-pub async fn list(pool: &SqlitePool, include_deleted: bool) -> AppResult<Vec<ModelProvider>> {
-    let rows = if include_deleted {
-        sqlx::query_as!(
-            ModelProviderRow,
-            r#"
-            SELECT id, provider_name, api_format, base_url, provider_alias,
-                   api_key_alias, created_at, updated_at
-            FROM model_providers
-            ORDER BY created_at DESC, id DESC
-            "#,
-        )
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as!(
-            ModelProviderRow,
-            r#"
+pub async fn list(pool: &SqlitePool) -> AppResult<Vec<ModelProvider>> {
+    let records = sqlx::query_as!(
+        ModelProviderRecord,
+        r#"
             SELECT id, provider_name, api_format, base_url, provider_alias,
                    api_key_alias, created_at, updated_at
             FROM model_providers
             WHERE deleted_at IS NULL
             ORDER BY created_at DESC, id DESC
             "#,
-        )
-        .fetch_all(pool)
-        .await?
-    };
+    )
+    .fetch_all(pool)
+    .await?;
 
-    tracing::info!(
-        count = rows.len(),
-        include_deleted,
-        "model providers listed"
-    );
-    rows.into_iter().map(TryInto::try_into).collect()
+    tracing::info!(count = records.len(), "model providers listed");
+    records.into_iter().map(TryInto::try_into).collect()
 }
 
-pub async fn update(
-    pool: &SqlitePool,
-    input: UpdateModelProviderInput,
-) -> AppResult<ModelProvider> {
-    let api_format = input.api_format.map(ApiFormat::as_str);
-    let row = sqlx::query_as!(
-        ModelProviderRow,
+pub async fn update(pool: &SqlitePool, request: UpdateRequest) -> AppResult<ModelProvider> {
+    let api_format = request.api_format.map(ApiFormat::as_str);
+    // TODO save API KEY safety
+    let api_key_alias = match request.api_key {
+        Some(api_key) => Some(api_key),
+        None => None,
+    };
+    let record = sqlx::query_as!(
+        ModelProviderRecord,
         r#"
         UPDATE model_providers
         SET provider_name = COALESCE(?, provider_name),
@@ -142,18 +123,18 @@ pub async fn update(
         RETURNING id, provider_name, api_format, base_url, provider_alias,
                   api_key_alias, created_at, updated_at
         "#,
-        input.provider_name,
+        request.provider_name,
         api_format,
-        input.base_url,
-        input.provider_alias,
-        input.api_key_alias,
-        input.id,
+        request.base_url,
+        request.provider_alias,
+        api_key_alias,
+        request.id,
     )
     .fetch_one(pool)
     .await?;
 
-    tracing::info!(provider_id = %row.id, "model provider updated");
-    row.try_into()
+    tracing::info!(provider_id = %record.id, "model provider updated");
+    record.try_into()
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str) -> AppResult<()> {

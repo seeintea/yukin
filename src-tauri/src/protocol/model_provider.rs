@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::common::RecordTimestamps;
+use super::common::RecordMetadata;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,71 +41,64 @@ pub struct ModelProvider {
     pub provider_alias: String,
     pub api_key_alias: String,
     #[serde(flatten)]
-    pub timestamps: RecordTimestamps,
+    pub metadata: RecordMetadata,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateModelProviderInput {
+pub struct CreateRequest {
     pub provider_name: String,
     pub api_format: ApiFormat,
     pub base_url: String,
     pub provider_alias: String,
-    pub api_key_alias: String,
+    pub api_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetModelProviderInput {
+pub struct FindRequest {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ListModelProvidersInput {
-    #[serde(default)]
-    pub include_deleted: bool,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateModelProviderInput {
+pub struct UpdateRequest {
     pub id: String,
     pub provider_name: Option<String>,
     pub api_format: Option<ApiFormat>,
     pub base_url: Option<String>,
     pub provider_alias: Option<String>,
-    pub api_key_alias: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeleteModelProviderInput {
+pub struct DeleteRequest {
     pub id: String,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiFormat, CreateModelProviderInput, ModelProvider};
+    use super::{ApiFormat, CreateRequest, ModelProvider};
 
     #[test]
-    fn deserializes_camel_case_create_input() {
-        let input: CreateModelProviderInput = serde_json::from_value(serde_json::json!({
+    fn deserializes_camel_case_create_request() {
+        let request: CreateRequest = serde_json::from_value(serde_json::json!({
             "providerName": "OpenAI",
             "apiFormat": "openai",
             "baseUrl": "https://api.openai.com/v1",
             "providerAlias": "default",
-            "apiKeyAlias": "provider/default"
+            "apiKey": "sk-......"
         }))
-        .expect("valid model provider input");
+        .expect("valid model provider request");
 
-        assert_eq!(input.provider_name, "OpenAI");
-        assert_eq!(input.api_format, ApiFormat::OpenAi);
-        assert_eq!(input.api_key_alias, "provider/default");
+        assert_eq!(request.provider_name, "OpenAI");
+        assert_eq!(request.api_format, ApiFormat::OpenAi);
+        assert_eq!(request.api_key, "sk-......");
     }
 
     #[test]
-    fn serializes_timestamps_as_flat_camel_case_fields() {
+    fn serializes_metadata_as_flat_camel_case_fields() {
         let provider = ModelProvider {
             id: "01900000-0000-7000-8000-000000000001".into(),
             provider_name: "Anthropic".into(),
@@ -113,7 +106,7 @@ mod tests {
             base_url: "https://api.anthropic.com".into(),
             provider_alias: "claude".into(),
             api_key_alias: "provider/claude".into(),
-            timestamps: super::RecordTimestamps {
+            metadata: super::RecordMetadata {
                 created_at: "2026-08-13T13:23:22.487Z".into(),
                 updated_at: "2026-08-13T13:23:22.487Z".into(),
             },
@@ -123,7 +116,7 @@ mod tests {
 
         assert_eq!(value["apiFormat"], "anthropic");
         assert_eq!(value["createdAt"], "2026-08-13T13:23:22.487Z");
-        assert!(value.get("timestamps").is_none());
+        assert!(value.get("metadata").is_none());
         assert!(value.get("deletedAt").is_none());
     }
 }
