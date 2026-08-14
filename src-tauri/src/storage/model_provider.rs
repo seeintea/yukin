@@ -1,13 +1,29 @@
 use sqlx::SqlitePool;
-use uuid::Uuid;
 
 use crate::{
     protocol::{
         common::RecordMetadata,
-        model_provider::{ApiFormat, CreateRequest, ModelProvider, UpdateRequest},
+        model_provider::{ApiFormat, ModelProvider},
     },
     AppError, AppResult,
 };
+
+pub(crate) struct CreateParams {
+    pub id: String,
+    pub provider_name: String,
+    pub api_format: ApiFormat,
+    pub base_url: String,
+    pub provider_alias: String,
+    pub api_key_alias: String,
+}
+
+pub(crate) struct UpdateParams {
+    pub id: String,
+    pub provider_name: Option<String>,
+    pub api_format: Option<ApiFormat>,
+    pub base_url: Option<String>,
+    pub provider_alias: Option<String>,
+}
 
 struct ModelProviderRecord {
     id: String,
@@ -30,7 +46,6 @@ impl TryFrom<ModelProviderRecord> for ModelProvider {
             api_format: ApiFormat::try_from(record.api_format).map_err(AppError::Other)?,
             base_url: record.base_url,
             provider_alias: record.provider_alias,
-            api_key_alias: record.api_key_alias,
             metadata: RecordMetadata {
                 created_at: record.created_at,
                 updated_at: record.updated_at,
@@ -39,10 +54,7 @@ impl TryFrom<ModelProviderRecord> for ModelProvider {
     }
 }
 
-pub async fn create(pool: &SqlitePool, request: CreateRequest) -> AppResult<ModelProvider> {
-    let id = Uuid::now_v7().to_string();
-    // TODO save API KEY safety
-    let api_key_alias = request.api_key;
+pub async fn create(pool: &SqlitePool, params: CreateParams) -> AppResult<ModelProvider> {
     let record = sqlx::query_as!(
         ModelProviderRecord,
         r#"
@@ -52,12 +64,12 @@ pub async fn create(pool: &SqlitePool, request: CreateRequest) -> AppResult<Mode
         RETURNING id, provider_name, api_format, base_url, provider_alias,
                   api_key_alias, created_at, updated_at
         "#,
-        id,
-        request.provider_name,
-        request.api_format.as_str(),
-        request.base_url,
-        request.provider_alias,
-        api_key_alias
+        params.id,
+        params.provider_name,
+        params.api_format.as_str(),
+        params.base_url,
+        params.provider_alias,
+        params.api_key_alias
     )
     .fetch_one(pool)
     .await?;
@@ -67,6 +79,14 @@ pub async fn create(pool: &SqlitePool, request: CreateRequest) -> AppResult<Mode
 }
 
 pub async fn find(pool: &SqlitePool, id: &str) -> AppResult<ModelProvider> {
+    find_record(pool, id).await?.try_into()
+}
+
+pub(crate) async fn find_api_key_alias(pool: &SqlitePool, id: &str) -> AppResult<String> {
+    Ok(find_record(pool, id).await?.api_key_alias)
+}
+
+async fn find_record(pool: &SqlitePool, id: &str) -> AppResult<ModelProviderRecord> {
     let record = sqlx::query_as!(
         ModelProviderRecord,
         r#"
@@ -81,7 +101,7 @@ pub async fn find(pool: &SqlitePool, id: &str) -> AppResult<ModelProvider> {
     .await?;
 
     tracing::info!(provider_id = %record.id, "model provider loaded");
-    record.try_into()
+    Ok(record)
 }
 
 pub async fn list(pool: &SqlitePool) -> AppResult<Vec<ModelProvider>> {
@@ -102,13 +122,8 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<ModelProvider>> {
     records.into_iter().map(TryInto::try_into).collect()
 }
 
-pub async fn update(pool: &SqlitePool, request: UpdateRequest) -> AppResult<ModelProvider> {
-    let api_format = request.api_format.map(ApiFormat::as_str);
-    // TODO save API KEY safety
-    let api_key_alias = match request.api_key {
-        Some(api_key) => Some(api_key),
-        None => None,
-    };
+pub async fn update(pool: &SqlitePool, params: UpdateParams) -> AppResult<ModelProvider> {
+    let api_format = params.api_format.map(ApiFormat::as_str);
     let record = sqlx::query_as!(
         ModelProviderRecord,
         r#"
@@ -117,18 +132,16 @@ pub async fn update(pool: &SqlitePool, request: UpdateRequest) -> AppResult<Mode
             api_format = COALESCE(?, api_format),
             base_url = COALESCE(?, base_url),
             provider_alias = COALESCE(?, provider_alias),
-            api_key_alias = COALESCE(?, api_key_alias),
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ? AND deleted_at IS NULL
         RETURNING id, provider_name, api_format, base_url, provider_alias,
                   api_key_alias, created_at, updated_at
         "#,
-        request.provider_name,
+        params.provider_name,
         api_format,
-        request.base_url,
-        request.provider_alias,
-        api_key_alias,
-        request.id,
+        params.base_url,
+        params.provider_alias,
+        params.id,
     )
     .fetch_one(pool)
     .await?;

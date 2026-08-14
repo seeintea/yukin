@@ -39,7 +39,6 @@ pub struct ModelProvider {
     pub api_format: ApiFormat,
     pub base_url: String,
     pub provider_alias: String,
-    pub api_key_alias: String,
     #[serde(flatten)]
     pub metadata: RecordMetadata,
 }
@@ -68,7 +67,13 @@ pub struct UpdateRequest {
     pub api_format: Option<ApiFormat>,
     pub base_url: Option<String>,
     pub provider_alias: Option<String>,
-    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCredentialRequest {
+    pub id: String,
+    pub api_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,7 +110,6 @@ mod tests {
             api_format: ApiFormat::Anthropic,
             base_url: "https://api.anthropic.com".into(),
             provider_alias: "claude".into(),
-            api_key_alias: "provider/claude".into(),
             metadata: super::RecordMetadata {
                 created_at: "2026-08-13T13:23:22.487Z".into(),
                 updated_at: "2026-08-13T13:23:22.487Z".into(),
@@ -116,6 +120,7 @@ mod tests {
 
         assert_eq!(value["apiFormat"], "anthropic");
         assert_eq!(value["createdAt"], "2026-08-13T13:23:22.487Z");
+        assert!(value.get("apiKeyAlias").is_none());
         assert!(value.get("metadata").is_none());
         assert!(value.get("deletedAt").is_none());
     }

@@ -2,8 +2,10 @@ mod commands;
 mod diagnostics;
 mod error;
 mod protocol;
+mod security;
 mod state;
 mod storage;
+mod workflows;
 
 pub use error::{AppError, AppResult};
 pub use state::AppState;
@@ -30,6 +32,7 @@ pub fn run() {
             commands::model_provider::model_provider_find,
             commands::model_provider::model_provider_list,
             commands::model_provider::model_provider_update,
+            commands::model_provider::model_provider_credential_replace,
             commands::model_provider::model_provider_delete,
         ])
         .run(tauri::generate_context!())

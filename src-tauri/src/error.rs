@@ -10,6 +10,8 @@ pub enum AppError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("tauri: {0}")]
     Tauri(#[from] tauri::Error),
+    #[error("keyring: {0}")]
+    Keyring(#[from] keyring::Error),
     #[error("{0}")]
     Other(String),
 }
@@ -25,6 +27,7 @@ impl serde::Serialize for AppError {
             AppError::Db(_) => "db",
             AppError::Migrate(_) => "migrate",
             AppError::Tauri(_) => "tauri",
+            AppError::Keyring(_) => "keyring",
             AppError::Other(_) => "other",
         };
         let mut s = serializer.serialize_struct("AppError", 2)?;

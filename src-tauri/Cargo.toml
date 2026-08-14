@@ -34,3 +34,7 @@ uuid = { version = "1.24.0", features = ["v7"] }
 thiserror = "2.0.20"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+keyring = { version = "4.1.6", features = [
+  "apple-native-keyring-store",
+  "windows-native-keyring-store",
+] }

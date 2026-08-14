@@ -2,9 +2,11 @@ use tauri::State;
 
 use crate::{
     protocol::model_provider::{
-        CreateRequest, DeleteRequest, FindRequest, ModelProvider, UpdateRequest,
+        CreateRequest, DeleteRequest, FindRequest, ModelProvider, ReplaceCredentialRequest,
+        UpdateRequest,
     },
-    storage::model_provider,
+    storage::model_provider::{self, UpdateParams},
+    workflows::model_provider as model_provider_workflow,
     AppResult, AppState,
 };
 
@@ -13,7 +15,7 @@ pub async fn model_provider_create(
     state: State<'_, AppState>,
     request: CreateRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider::create(state.db(), request).await
+    model_provider_workflow::create(state.db(), request).await
 }
 
 #[tauri::command]
@@ -34,7 +36,25 @@ pub async fn model_provider_update(
     state: State<'_, AppState>,
     request: UpdateRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider::update(state.db(), request).await
+    model_provider::update(
+        state.db(),
+        UpdateParams {
+            id: request.id,
+            provider_name: request.provider_name,
+            api_format: request.api_format,
+            base_url: request.base_url,
+            provider_alias: request.provider_alias,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn model_provider_credential_replace(
+    state: State<'_, AppState>,
+    request: ReplaceCredentialRequest,
+) -> AppResult<()> {
+    model_provider_workflow::replace_credential(state.db(), &request.id, &request.api_key).await
 }
 
 #[tauri::command]
@@ -42,5 +62,5 @@ pub async fn model_provider_delete(
     state: State<'_, AppState>,
     request: DeleteRequest,
 ) -> AppResult<()> {
-    model_provider::delete(state.db(), &request.id).await
+    model_provider_workflow::delete(state.db(), &request.id).await
 }
