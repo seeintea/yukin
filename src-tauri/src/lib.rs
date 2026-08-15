@@ -1,3 +1,4 @@
+mod agent;
 mod commands;
 mod diagnostics;
 mod error;
@@ -36,6 +37,7 @@ pub fn run() {
             commands::model_provider::model_provider_update,
             commands::model_provider::model_provider_credential_replace,
             commands::model_provider::model_provider_delete,
+            commands::model_response::model_response_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running yukin.");

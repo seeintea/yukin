@@ -38,3 +38,6 @@ keyring = { version = "4.1.6", features = [
   "apple-native-keyring-store",
   "windows-native-keyring-store",
 ] }
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
+eventsource-stream = "0.2.3"
+futures-util = "0.3.34"

@@ -25,6 +25,12 @@ pub(crate) struct UpdateParams {
     pub provider_alias: Option<String>,
 }
 
+pub(crate) struct RuntimeConfig {
+    pub api_format: ApiFormat,
+    pub base_url: String,
+    pub api_key_alias: String,
+}
+
 struct ModelProviderRecord {
     id: String,
     provider_name: String,
@@ -84,6 +90,16 @@ pub async fn find(pool: &SqlitePool, id: &str) -> AppResult<ModelProvider> {
 
 pub(crate) async fn find_api_key_alias(pool: &SqlitePool, id: &str) -> AppResult<String> {
     Ok(find_record(pool, id).await?.api_key_alias)
+}
+
+pub(crate) async fn find_runtime_config(pool: &SqlitePool, id: &str) -> AppResult<RuntimeConfig> {
+    let record = find_record(pool, id).await?;
+
+    Ok(RuntimeConfig {
+        api_format: ApiFormat::try_from(record.api_format).map_err(AppError::Other)?,
+        base_url: record.base_url,
+        api_key_alias: record.api_key_alias,
+    })
 }
 
 async fn find_record(pool: &SqlitePool, id: &str) -> AppResult<ModelProviderRecord> {
