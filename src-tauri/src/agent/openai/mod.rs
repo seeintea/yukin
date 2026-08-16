@@ -1,20 +1,61 @@
 mod protocol;
 
+use std::collections::VecDeque;
+
 use futures_util::{stream, StreamExt};
 use reqwest::{header::ACCEPT, Client, StatusCode};
 
-use crate::agent::{sse, CompletionStream, Message, ModelError, StreamEvent, TokenUsage};
+use crate::agent::{
+    sse, Completion, CompletionRequest, CompletionStream, ModelError, StreamEvent, TokenUsage,
+};
 
-use protocol::{ChatCompletionChunk, ChatCompletionRequest, ErrorResponse, Usage};
+use protocol::{
+    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ErrorResponse, Usage,
+};
+
+pub(crate) async fn complete(
+    client: &Client,
+    base_url: &str,
+    api_key: &str,
+    request: CompletionRequest,
+) -> Result<Completion, ModelError> {
+    let response = client
+        .post(base_url)
+        .bearer_auth(api_key)
+        .json(&ChatCompletionRequest::non_streaming(request))
+        .send()
+        .await
+        .map_err(map_transport_error)?;
+
+    let status = response.status();
+    let body = response.text().await.map_err(map_transport_error)?;
+    if !status.is_success() {
+        return Err(map_response_error(status, &body));
+    }
+
+    let response = serde_json::from_str::<ChatCompletionResponse>(&body)
+        .map_err(|error| ModelError::Protocol(format!("invalid OpenAI response: {error}")))?;
+    let choice = response
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(|| ModelError::Protocol("OpenAI response contained no choices".into()))?;
+
+    Ok(Completion {
+        content: choice.message.content,
+        reasoning_content: choice.message.reasoning_content,
+        finish_reason: choice.finish_reason,
+        usage: response.usage.map(Into::into),
+    })
+}
 
 pub(crate) async fn stream_completion(
     client: &Client,
     base_url: &str,
     api_key: &str,
-    model: String,
-    messages: Vec<Message>,
+    request: CompletionRequest,
 ) -> Result<CompletionStream, ModelError> {
-    let request = ChatCompletionRequest::streaming(model, messages);
+    let request = ChatCompletionRequest::streaming(request);
     let response = client
         .post(base_url)
         .bearer_auth(api_key)
@@ -34,19 +75,19 @@ pub(crate) async fn stream_completion(
     let state = CompletionState::new(events);
 
     Ok(stream::try_unfold(state, |mut state| async move {
-        if state.completed {
-            return Ok(None);
-        }
-
         loop {
+            if let Some(output) = state.pending.pop_front() {
+                return Ok(Some((output, state)));
+            }
+            if state.completed {
+                return Ok(None);
+            }
+
             let event = state.events.next().await.ok_or_else(|| {
                 ModelError::Protocol("stream ended before the [DONE] event".into())
             })?;
             let event = event.map_err(map_sse_error)?;
-
-            if let Some(output) = state.consume(&event.data)? {
-                return Ok(Some((output, state)));
-            }
+            state.consume(&event.data)?;
         }
     })
     .boxed())
@@ -56,6 +97,7 @@ struct CompletionState<S> {
     events: S,
     finish_reason: Option<String>,
     usage: Option<TokenUsage>,
+    pending: VecDeque<StreamEvent>,
     completed: bool,
 }
 
@@ -65,17 +107,19 @@ impl<S> CompletionState<S> {
             events,
             finish_reason: None,
             usage: None,
+            pending: VecDeque::new(),
             completed: false,
         }
     }
 
-    fn consume(&mut self, data: &str) -> Result<Option<StreamEvent>, ModelError> {
+    fn consume(&mut self, data: &str) -> Result<(), ModelError> {
         if data.trim() == "[DONE]" {
             self.completed = true;
-            return Ok(Some(StreamEvent::Completed {
+            self.pending.push_back(StreamEvent::Completed {
                 finish_reason: self.finish_reason.take(),
                 usage: self.usage.take(),
-            }));
+            });
+            return Ok(());
         }
 
         let chunk = serde_json::from_str::<ChatCompletionChunk>(data).map_err(|error| {
@@ -94,18 +138,26 @@ impl<S> CompletionState<S> {
         }
 
         let Some(choice) = chunk.choices.into_iter().next() else {
-            return Ok(None);
+            return Ok(());
         };
 
         if let Some(finish_reason) = choice.finish_reason {
             self.finish_reason = Some(finish_reason);
         }
 
-        Ok(choice
+        if let Some(content) = choice
             .delta
-            .content
+            .reasoning_content
             .filter(|content| !content.is_empty())
-            .map(|content| StreamEvent::TextDelta { content }))
+        {
+            self.pending
+                .push_back(StreamEvent::ReasoningDelta { content });
+        }
+        if let Some(content) = choice.delta.content.filter(|content| !content.is_empty()) {
+            self.pending.push_back(StreamEvent::TextDelta { content });
+        }
+
+        Ok(())
     }
 }
 
@@ -166,9 +218,76 @@ mod tests {
     use futures_util::StreamExt;
     use reqwest::{Client, StatusCode};
 
-    use crate::agent::{Message, ModelError, Role, StreamEvent, TokenUsage};
+    use crate::agent::{
+        Completion, CompletionRequest, Message, ModelError, ReasoningEffort, Role, StreamEvent,
+        ThinkingMode, TokenUsage,
+    };
 
-    use super::{map_response_error, stream_completion, CompletionState};
+    use super::{complete, map_response_error, stream_completion, CompletionState};
+
+    #[test]
+    fn sends_non_streaming_request_and_returns_thinking_completion() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("local test listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("test request");
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("read timeout");
+
+            let request = read_http_request(&mut socket);
+            let body = concat!(
+                "{\"choices\":[{\"message\":{\"reasoning_content\":\"先思考\",",
+                "\"content\":\"答案\"},\"finish_reason\":\"stop\"}],",
+                "\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}"
+            );
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("test response");
+
+            request
+        });
+
+        let client = Client::new();
+        let mut completion_request = CompletionRequest::new(
+            "deepseek-v4-pro".into(),
+            vec![Message {
+                role: Role::User,
+                content: "问题".into(),
+            }],
+        );
+        completion_request.thinking = Some(ThinkingMode::Enabled);
+        completion_request.reasoning_effort = Some(ReasoningEffort::Max);
+        let output = tauri::async_runtime::block_on(complete(
+            &client,
+            &format!("http://{address}/chat/completions"),
+            "test-key",
+            completion_request,
+        ))
+        .expect("OpenAI completion");
+        let request = server.join().expect("test server");
+
+        assert!(request.contains(r#""stream":false"#));
+        assert!(request.contains(r#""thinking":{"type":"enabled"}"#));
+        assert!(request.contains(r#""reasoning_effort":"max""#));
+        assert_eq!(
+            output,
+            Completion {
+                content: Some("答案".into()),
+                reasoning_content: Some("先思考".into()),
+                finish_reason: Some("stop".into()),
+                usage: Some(TokenUsage {
+                    prompt_tokens: 2,
+                    completion_tokens: 3,
+                    total_tokens: 5,
+                }),
+            }
+        );
+    }
 
     #[test]
     fn sends_request_and_streams_openai_events() {
@@ -204,11 +323,13 @@ mod tests {
                 &client,
                 &format!("http://{address}/chat/completions"),
                 "test-key",
-                "deepseek-chat".into(),
-                vec![Message {
-                    role: Role::User,
-                    content: "你好".into(),
-                }],
+                CompletionRequest::new(
+                    "deepseek-chat".into(),
+                    vec![Message {
+                        role: Role::User,
+                        content: "你好".into(),
+                    }],
+                ),
             )
             .await
             .expect("OpenAI stream");
@@ -245,28 +366,34 @@ mod tests {
     fn maps_chunks_and_done_to_internal_events() {
         let mut state = CompletionState::new(());
 
-        let delta = state
+        state
             .consume(
-                r#"{"choices":[{"delta":{"content":"你好"},"finish_reason":null}],"usage":null}"#,
+                r#"{"choices":[{"delta":{"reasoning_content":"先思考","content":"你好"},"finish_reason":null}],"usage":null}"#,
             )
             .expect("valid delta");
         assert_eq!(
-            delta,
+            state.pending.pop_front(),
+            Some(StreamEvent::ReasoningDelta {
+                content: "先思考".into()
+            })
+        );
+        assert_eq!(
+            state.pending.pop_front(),
             Some(StreamEvent::TextDelta {
                 content: "你好".into()
             })
         );
 
-        let finished = state
+        state
             .consume(
                 r#"{"choices":[{"delta":{"content":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}"#,
             )
             .expect("valid finished chunk");
-        assert_eq!(finished, None);
+        assert_eq!(state.pending.pop_front(), None);
 
-        let completed = state.consume("[DONE]").expect("valid done event");
+        state.consume("[DONE]").expect("valid done event");
         assert_eq!(
-            completed,
+            state.pending.pop_front(),
             Some(StreamEvent::Completed {
                 finish_reason: Some("stop".into()),
                 usage: Some(TokenUsage {

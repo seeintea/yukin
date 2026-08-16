@@ -28,14 +28,17 @@ pub async fn model_response_stream(
     .await?;
 
     while let Some(event) = stream.next().await {
-        events.send(map_event(event?))?;
+        if let Some(event) = map_event(event?) {
+            events.send(event)?;
+        }
     }
 
     Ok(())
 }
 
-fn map_event(event: agent::StreamEvent) -> ResponseStreamEvent {
-    match event {
+fn map_event(event: agent::StreamEvent) -> Option<ResponseStreamEvent> {
+    Some(match event {
+        agent::StreamEvent::ReasoningDelta { .. } => return None,
         agent::StreamEvent::TextDelta { content } => ResponseStreamEvent::OutputDelta { content },
         agent::StreamEvent::Completed {
             finish_reason,
@@ -48,5 +51,5 @@ fn map_event(event: agent::StreamEvent) -> ResponseStreamEvent {
                 total_tokens: usage.total_tokens,
             }),
         },
-    }
+    })
 }

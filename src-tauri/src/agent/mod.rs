@@ -5,7 +5,7 @@ use futures_util::stream::BoxStream;
 use reqwest::Client;
 use serde::Serialize;
 
-use crate::protocol::model_provider::ApiFormat;
+pub use crate::protocol::model_provider::ApiFormat;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ModelError {
@@ -49,26 +49,73 @@ impl ModelError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct Message {
+pub struct Message {
     pub role: Role,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Role {
+pub enum Role {
     User,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TokenUsage {
+pub enum ThinkingMode {
+    Enabled,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    pub thinking: Option<ThinkingMode>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+impl CompletionRequest {
+    pub fn new(model: String, messages: Vec<Message>) -> Self {
+        Self {
+            model,
+            messages,
+            thinking: None,
+            reasoning_effort: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum StreamEvent {
+pub struct Completion {
+    pub content: Option<String>,
+    pub reasoning_content: Option<String>,
+    pub finish_reason: Option<String>,
+    pub usage: Option<TokenUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamEvent {
+    ReasoningDelta {
+        content: String,
+    },
     TextDelta {
         content: String,
     },
@@ -78,20 +125,30 @@ pub(crate) enum StreamEvent {
     },
 }
 
-pub(crate) type CompletionStream = BoxStream<'static, Result<StreamEvent, ModelError>>;
+pub type CompletionStream = BoxStream<'static, Result<StreamEvent, ModelError>>;
 
-pub(crate) async fn stream_completion(
+pub async fn stream_completion(
     client: &Client,
     api_format: ApiFormat,
     base_url: &str,
     api_key: &str,
-    model: String,
-    messages: Vec<Message>,
+    request: CompletionRequest,
 ) -> Result<CompletionStream, ModelError> {
     match api_format {
-        ApiFormat::OpenAi => {
-            openai::stream_completion(client, base_url, api_key, model, messages).await
-        }
+        ApiFormat::OpenAi => openai::stream_completion(client, base_url, api_key, request).await,
+        ApiFormat::Anthropic => Err(ModelError::UnsupportedFormat(api_format.as_str())),
+    }
+}
+
+pub async fn complete(
+    client: &Client,
+    api_format: ApiFormat,
+    base_url: &str,
+    api_key: &str,
+    request: CompletionRequest,
+) -> Result<Completion, ModelError> {
+    match api_format {
+        ApiFormat::OpenAi => openai::complete(client, base_url, api_key, request).await,
         ApiFormat::Anthropic => Err(ModelError::UnsupportedFormat(api_format.as_str())),
     }
 }

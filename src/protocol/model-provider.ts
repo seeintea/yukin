@@ -2,9 +2,13 @@ import type { RecordMetadata } from "./common";
 
 export type ApiFormat = "openai" | "anthropic";
 
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface ModelPreset {
   modelId: string;
   displayName: string;
+  supportsThinking: boolean;
+  reasoningEfforts: ReasoningEffort[];
 }
 
 export interface ConnectionPreset {

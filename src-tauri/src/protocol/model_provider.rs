@@ -36,6 +36,20 @@ impl TryFrom<String> for ApiFormat {
 pub struct ModelPreset {
     pub model_id: String,
     pub display_name: String,
+    pub supports_thinking: bool,
+    pub reasoning_efforts: Vec<ReasoningEffort>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,7 +120,7 @@ pub struct DeleteRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiFormat, CreateRequest, ModelProvider};
+    use super::{ApiFormat, CreateRequest, ModelPreset, ModelProvider, ReasoningEffort};
 
     #[test]
     fn deserializes_camel_case_create_request() {
@@ -145,5 +159,23 @@ mod tests {
         assert!(value.get("apiKeyAlias").is_none());
         assert!(value.get("metadata").is_none());
         assert!(value.get("deletedAt").is_none());
+    }
+
+    #[test]
+    fn serializes_model_capabilities() {
+        let model = ModelPreset {
+            model_id: "deepseek-v4-pro".into(),
+            display_name: "V4 Pro".into(),
+            supports_thinking: true,
+            reasoning_efforts: vec![ReasoningEffort::High, ReasoningEffort::Max],
+        };
+
+        let value = serde_json::to_value(model).expect("serializable model preset");
+
+        assert_eq!(value["supportsThinking"], true);
+        assert_eq!(
+            value["reasoningEfforts"],
+            serde_json::json!(["high", "max"])
+        );
     }
 }

@@ -2,7 +2,7 @@ use reqwest::Client;
 use sqlx::SqlitePool;
 
 use crate::{
-    agent::{self, CompletionStream, Message, ModelError, Role},
+    agent::{self, CompletionRequest, CompletionStream, Message, ModelError, Role},
     security::keychain,
     storage::model_provider,
     AppResult,
@@ -27,11 +27,13 @@ pub(crate) async fn stream(
         config.api_format,
         &config.base_url,
         &api_key,
-        params.model_id,
-        vec![Message {
-            role: Role::User,
-            content: params.content,
-        }],
+        CompletionRequest::new(
+            params.model_id,
+            vec![Message {
+                role: Role::User,
+                content: params.content,
+            }],
+        ),
     )
     .await
     .map_err(Into::into)

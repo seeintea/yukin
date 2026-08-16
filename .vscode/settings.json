@@ -16,7 +16,8 @@
     "strftime",
     "nocase",
     "chrono",
-    "thiserror"
+    "thiserror",
+    "deepseek"
   ],
   "files.readonlyInclude": {
     "**/routeTree.gen.ts": true

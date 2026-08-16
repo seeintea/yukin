@@ -1,4 +1,4 @@
-mod agent;
+pub mod agent;
 mod commands;
 mod diagnostics;
 mod error;
