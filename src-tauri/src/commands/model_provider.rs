@@ -46,7 +46,6 @@ pub async fn model_provider_update(
         state.db(),
         UpdateParams {
             id: request.id,
-            provider_name: request.provider_name,
             api_format: request.api_format,
             base_url: request.base_url,
             provider_alias: request.provider_alias,

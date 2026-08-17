@@ -18,20 +18,21 @@ export interface ConnectionPreset {
 }
 
 export interface ModelProviderPreset {
-  providerName: string;
+  providerKey: string;
+  displayName: string;
   connections: ConnectionPreset[];
 }
 
 export interface ModelProvider extends RecordMetadata {
   id: string;
-  providerName: string;
+  providerKey: string;
   apiFormat: ApiFormat;
   baseUrl: string;
   providerAlias: string;
 }
 
 export interface CreateRequest {
-  providerName: string;
+  providerKey: string;
   apiFormat: ApiFormat;
   baseUrl: string;
   providerAlias: string;
@@ -44,7 +45,6 @@ export interface FindRequest {
 
 export interface UpdateRequest {
   id: string;
-  providerName?: string;
   apiFormat?: ApiFormat;
   baseUrl?: string;
   providerAlias?: string;

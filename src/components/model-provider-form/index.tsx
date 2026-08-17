@@ -19,7 +19,7 @@ import {
 } from "#/shadcn/select";
 
 const providerInputSchema = z.object({
-  providerName: z.string().trim().min(1, "请选择供应商"),
+  providerKey: z.string().trim().min(1, "请选择供应商"),
   apiFormat: z.enum(["openai", "anthropic"], {
     error: "请选择兼容 API 格式",
   }),
@@ -35,8 +35,8 @@ const apiFormatLabels: Record<ApiFormat, string> = {
   anthropic: "Anthropic",
 };
 
-function findPreset(presets: ModelProviderPreset[], providerName: string) {
-  return presets.find((preset) => preset.providerName === providerName);
+function findPreset(presets: ModelProviderPreset[], providerKey: string) {
+  return presets.find((preset) => preset.providerKey === providerKey);
 }
 
 export interface ModelProviderFormRef {
@@ -62,17 +62,17 @@ export function ModelProviderForm(props: ModelProviderFormProps) {
   const form = useForm<ProviderFormValues>({
     resolver: zodResolver(providerInputSchema),
     defaultValues: {
-      providerName: "",
+      providerKey: "",
       providerAlias: "",
       baseUrl: "",
       apiKey: "",
     },
   });
 
-  const selectedPreset = findPreset(presets, form.watch("providerName"));
+  const selectedPreset = findPreset(presets, form.watch("providerKey"));
   const providerItems = presets.map((preset) => ({
-    label: preset.providerName,
-    value: preset.providerName,
+    label: preset.displayName,
+    value: preset.providerKey,
   }));
   const apiFormatItems =
     selectedPreset?.connections.map((connection) => ({
@@ -91,7 +91,7 @@ export function ModelProviderForm(props: ModelProviderFormProps) {
     <form id={id} onSubmit={form.handleSubmit(onSubmit)}>
       <FieldGroup>
         <Controller
-          name="providerName"
+          name="providerKey"
           control={form.control}
           render={({ field, fieldState }) => (
             <Field>
@@ -99,13 +99,13 @@ export function ModelProviderForm(props: ModelProviderFormProps) {
               <Select
                 value={field.value || null}
                 onValueChange={(value) => {
-                  const providerName = value ?? "";
-                  const preset = findPreset(presets, providerName);
+                  const providerKey = value ?? "";
+                  const preset = findPreset(presets, providerKey);
                   const connection = preset?.connections[0];
 
                   baseUrlManuallyEditedRef.current = false;
-                  field.onChange(providerName);
-                  form.setValue("providerAlias", providerName, {
+                  field.onChange(providerKey);
+                  form.setValue("providerAlias", preset?.displayName ?? "", {
                     shouldDirty: false,
                     shouldTouch: false,
                     shouldValidate: true,

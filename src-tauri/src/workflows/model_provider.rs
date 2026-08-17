@@ -2,6 +2,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
+    model_provider::catalog,
     protocol::model_provider::{CreateRequest, ModelProvider},
     security::keychain,
     storage::model_provider::{self, CreateParams},
@@ -9,6 +10,24 @@ use crate::{
 };
 
 pub async fn create(pool: &SqlitePool, request: CreateRequest) -> AppResult<ModelProvider> {
+    let preset = catalog::find_model_provider_preset(&request.provider_key).ok_or_else(|| {
+        crate::AppError::Other(format!(
+            "unsupported model provider: {}",
+            request.provider_key
+        ))
+    })?;
+    if !preset
+        .connections
+        .iter()
+        .any(|connection| connection.api_format == request.api_format)
+    {
+        return Err(crate::AppError::Other(format!(
+            "unsupported API format {} for model provider {}",
+            request.api_format.as_str(),
+            request.provider_key
+        )));
+    }
+
     let id = Uuid::now_v7().to_string();
     let api_key_alias = Uuid::now_v7().to_string();
 
@@ -18,7 +37,7 @@ pub async fn create(pool: &SqlitePool, request: CreateRequest) -> AppResult<Mode
         pool,
         CreateParams {
             id,
-            provider_name: request.provider_name,
+            provider_key: preset.provider_key,
             api_format: request.api_format,
             base_url: request.base_url,
             provider_alias: request.provider_alias,

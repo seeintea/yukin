@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, provider_name, api_format, base_url, provider_alias,\n                   api_key_alias, created_at, updated_at\n            FROM model_providers\n            WHERE deleted_at IS NULL\n            ORDER BY created_at DESC, id DESC\n            ",
+  "query": "\n        UPDATE model_providers\n        SET api_format = COALESCE(?, api_format),\n            base_url = COALESCE(?, base_url),\n            provider_alias = COALESCE(?, provider_alias),\n            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')\n        WHERE id = ? AND deleted_at IS NULL\n        RETURNING id, provider_key, api_format, base_url, provider_alias,\n                  api_key_alias, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -15,13 +15,13 @@
         }
       },
       {
-        "name": "provider_name",
+        "name": "provider_key",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "model_providers",
-            "name": "provider_name"
+            "name": "provider_key"
           }
         }
       },
@@ -93,7 +93,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 4
     },
     "nullable": [
       false,
@@ -106,5 +106,5 @@
       false
     ]
   },
-  "hash": "bc36b3514f30dc27a26e4617f2eeb89bf910fd52e7d4f1cea0b1d66e478b32a6"
+  "hash": "f6bf549163c34eff9d239ff0e65e653612ca4d14821b1c92ac00043d7b0af78e"
 }

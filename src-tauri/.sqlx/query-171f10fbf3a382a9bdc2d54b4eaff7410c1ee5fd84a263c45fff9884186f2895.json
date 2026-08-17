@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        INSERT INTO model_providers (\n            id, provider_name, api_format, base_url, provider_alias, api_key_alias\n        ) VALUES (?, ?, ?, ?, ?, ?)\n        RETURNING id, provider_name, api_format, base_url, provider_alias,\n                  api_key_alias, created_at, updated_at\n        ",
+  "query": "\n        INSERT INTO model_providers (\n            id, provider_key, api_format, base_url, provider_alias, api_key_alias\n        ) VALUES (?, ?, ?, ?, ?, ?)\n        RETURNING id, provider_key, api_format, base_url, provider_alias,\n                  api_key_alias, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -15,13 +15,13 @@
         }
       },
       {
-        "name": "provider_name",
+        "name": "provider_key",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "model_providers",
-            "name": "provider_name"
+            "name": "provider_key"
           }
         }
       },
@@ -106,5 +106,5 @@
       false
     ]
   },
-  "hash": "9a54d08b7051b7febb2353cac76e9fd0249b49ef76ca5f1747ed8a981fdd668a"
+  "hash": "171f10fbf3a382a9bdc2d54b4eaff7410c1ee5fd84a263c45fff9884186f2895"
 }

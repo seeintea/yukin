@@ -10,7 +10,7 @@ use crate::{
 
 pub(crate) struct CreateParams {
     pub id: String,
-    pub provider_name: String,
+    pub provider_key: String,
     pub api_format: ApiFormat,
     pub base_url: String,
     pub provider_alias: String,
@@ -19,7 +19,6 @@ pub(crate) struct CreateParams {
 
 pub(crate) struct UpdateParams {
     pub id: String,
-    pub provider_name: Option<String>,
     pub api_format: Option<ApiFormat>,
     pub base_url: Option<String>,
     pub provider_alias: Option<String>,
@@ -33,7 +32,7 @@ pub(crate) struct RuntimeConfig {
 
 struct ModelProviderRecord {
     id: String,
-    provider_name: String,
+    provider_key: String,
     api_format: String,
     base_url: String,
     provider_alias: String,
@@ -48,7 +47,7 @@ impl TryFrom<ModelProviderRecord> for ModelProvider {
     fn try_from(record: ModelProviderRecord) -> Result<Self, Self::Error> {
         Ok(Self {
             id: record.id,
-            provider_name: record.provider_name,
+            provider_key: record.provider_key,
             api_format: ApiFormat::try_from(record.api_format).map_err(AppError::Other)?,
             base_url: record.base_url,
             provider_alias: record.provider_alias,
@@ -65,13 +64,13 @@ pub async fn create(pool: &SqlitePool, params: CreateParams) -> AppResult<ModelP
         ModelProviderRecord,
         r#"
         INSERT INTO model_providers (
-            id, provider_name, api_format, base_url, provider_alias, api_key_alias
+            id, provider_key, api_format, base_url, provider_alias, api_key_alias
         ) VALUES (?, ?, ?, ?, ?, ?)
-        RETURNING id, provider_name, api_format, base_url, provider_alias,
+        RETURNING id, provider_key, api_format, base_url, provider_alias,
                   api_key_alias, created_at, updated_at
         "#,
         params.id,
-        params.provider_name,
+        params.provider_key,
         params.api_format.as_str(),
         params.base_url,
         params.provider_alias,
@@ -106,7 +105,7 @@ async fn find_record(pool: &SqlitePool, id: &str) -> AppResult<ModelProviderReco
     let record = sqlx::query_as!(
         ModelProviderRecord,
         r#"
-        SELECT id, provider_name, api_format, base_url, provider_alias,
+        SELECT id, provider_key, api_format, base_url, provider_alias,
                api_key_alias, created_at, updated_at
         FROM model_providers
         WHERE id = ? AND deleted_at IS NULL
@@ -124,7 +123,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<ModelProvider>> {
     let records = sqlx::query_as!(
         ModelProviderRecord,
         r#"
-            SELECT id, provider_name, api_format, base_url, provider_alias,
+            SELECT id, provider_key, api_format, base_url, provider_alias,
                    api_key_alias, created_at, updated_at
             FROM model_providers
             WHERE deleted_at IS NULL
@@ -144,16 +143,14 @@ pub async fn update(pool: &SqlitePool, params: UpdateParams) -> AppResult<ModelP
         ModelProviderRecord,
         r#"
         UPDATE model_providers
-        SET provider_name = COALESCE(?, provider_name),
-            api_format = COALESCE(?, api_format),
+        SET api_format = COALESCE(?, api_format),
             base_url = COALESCE(?, base_url),
             provider_alias = COALESCE(?, provider_alias),
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ? AND deleted_at IS NULL
-        RETURNING id, provider_name, api_format, base_url, provider_alias,
+        RETURNING id, provider_key, api_format, base_url, provider_alias,
                   api_key_alias, created_at, updated_at
         "#,
-        params.provider_name,
         api_format,
         params.base_url,
         params.provider_alias,

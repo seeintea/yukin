@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n        SELECT id, provider_name, api_format, base_url, provider_alias,\n               api_key_alias, created_at, updated_at\n        FROM model_providers\n        WHERE id = ? AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT id, provider_key, api_format, base_url, provider_alias,\n               api_key_alias, created_at, updated_at\n        FROM model_providers\n        WHERE id = ? AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -15,13 +15,13 @@
         }
       },
       {
-        "name": "provider_name",
+        "name": "provider_key",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "model_providers",
-            "name": "provider_name"
+            "name": "provider_key"
           }
         }
       },
@@ -106,5 +106,5 @@
       false
     ]
   },
-  "hash": "98220ca209916d1e71ec88de44f7b55b30fca0463f8ecf412d993e7ff29b4cdb"
+  "hash": "4424e19f871a16666185948597879f44383ea08e978b4b07c073ef1bb17e05d6"
 }

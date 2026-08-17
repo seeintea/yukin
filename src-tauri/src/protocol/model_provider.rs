@@ -63,7 +63,8 @@ pub struct ConnectionPreset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelProviderPreset {
-    pub provider_name: String,
+    pub provider_key: String,
+    pub display_name: String,
     pub connections: Vec<ConnectionPreset>,
 }
 
@@ -71,7 +72,7 @@ pub struct ModelProviderPreset {
 #[serde(rename_all = "camelCase")]
 pub struct ModelProvider {
     pub id: String,
-    pub provider_name: String,
+    pub provider_key: String,
     pub api_format: ApiFormat,
     pub base_url: String,
     pub provider_alias: String,
@@ -82,7 +83,7 @@ pub struct ModelProvider {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRequest {
-    pub provider_name: String,
+    pub provider_key: String,
     pub api_format: ApiFormat,
     pub base_url: String,
     pub provider_alias: String,
@@ -99,7 +100,6 @@ pub struct FindRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRequest {
     pub id: String,
-    pub provider_name: Option<String>,
     pub api_format: Option<ApiFormat>,
     pub base_url: Option<String>,
     pub provider_alias: Option<String>,
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn deserializes_camel_case_create_request() {
         let request: CreateRequest = serde_json::from_value(serde_json::json!({
-            "providerName": "OpenAI",
+            "providerKey": "openai",
             "apiFormat": "openai",
             "baseUrl": "https://api.openai.com/v1",
             "providerAlias": "default",
@@ -133,7 +133,7 @@ mod tests {
         }))
         .expect("valid model provider request");
 
-        assert_eq!(request.provider_name, "OpenAI");
+        assert_eq!(request.provider_key, "openai");
         assert_eq!(request.api_format, ApiFormat::OpenAi);
         assert_eq!(request.api_key, "sk-......");
     }
@@ -142,7 +142,7 @@ mod tests {
     fn serializes_metadata_as_flat_camel_case_fields() {
         let provider = ModelProvider {
             id: "01900000-0000-7000-8000-000000000001".into(),
-            provider_name: "Anthropic".into(),
+            provider_key: "anthropic".into(),
             api_format: ApiFormat::Anthropic,
             base_url: "https://api.anthropic.com".into(),
             provider_alias: "claude".into(),
