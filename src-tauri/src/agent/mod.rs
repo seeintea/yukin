@@ -77,6 +77,20 @@ pub enum ReasoningEffort {
     Max,
 }
 
+impl From<crate::protocol::model_provider::ReasoningEffort> for ReasoningEffort {
+    fn from(effort: crate::protocol::model_provider::ReasoningEffort) -> Self {
+        match effort {
+            crate::protocol::model_provider::ReasoningEffort::None => Self::None,
+            crate::protocol::model_provider::ReasoningEffort::Minimal => Self::Minimal,
+            crate::protocol::model_provider::ReasoningEffort::Low => Self::Low,
+            crate::protocol::model_provider::ReasoningEffort::Medium => Self::Medium,
+            crate::protocol::model_provider::ReasoningEffort::High => Self::High,
+            crate::protocol::model_provider::ReasoningEffort::XHigh => Self::XHigh,
+            crate::protocol::model_provider::ReasoningEffort::Max => Self::Max,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionRequest {
     pub model: String,

@@ -1,6 +1,9 @@
+import type { ReasoningEffort } from "./model-provider";
+
 export interface StreamRequest {
   providerId: string;
   modelId: string;
+  reasoningEffort: ReasoningEffort | null;
   content: string;
 }
 

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { modelResponseStream } from "#/api/model-response";
 import { ChatInput } from "#/components/chat-input";
 import type { ChatInputValue } from "#/components/chat-input";
+import { Markdown } from "#/components/markdown";
 import { toast } from "#/shadcn/toast";
 
 interface Turn {
@@ -36,6 +37,7 @@ export function Chat() {
         {
           providerId: selection.providerId,
           modelId: selection.modelId,
+          reasoningEffort: selection.reasoningEffort,
           content,
         },
         (event) => {
@@ -73,8 +75,12 @@ export function Chat() {
             <div className="ml-auto max-w-[80%] rounded-2xl bg-muted px-4 py-3 whitespace-pre-wrap">
               {turn.userContent}
             </div>
-            <div className="max-w-none whitespace-pre-wrap">
-              {turn.assistantContent || (isPending ? "正在生成…" : "")}
+            <div className="max-w-none">
+              {turn.assistantContent ? (
+                <Markdown content={turn.assistantContent} isStreaming={isPending} />
+              ) : isPending ? (
+                "正在生成…"
+              ) : null}
             </div>
           </div>
         )}

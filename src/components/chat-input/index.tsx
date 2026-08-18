@@ -46,7 +46,7 @@ export function ChatInput({ isPending, onSubmit }: ChatInputProps) {
   };
 
   return (
-    <form className="w-full rounded-2xl border bg-card p-2 shadow-sm" onSubmit={handleSubmit}>
+    <form className="w-full rounded-2xl border bg-card p-2" onSubmit={handleSubmit}>
       <Textarea
         value={content}
         onChange={(event) => setContent(event.target.value)}

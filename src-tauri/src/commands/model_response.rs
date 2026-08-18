@@ -22,6 +22,7 @@ pub async fn model_response_stream(
         StreamParams {
             provider_id: request.provider_id,
             model_id: request.model_id,
+            reasoning_effort: request.reasoning_effort,
             content: request.content,
         },
     )

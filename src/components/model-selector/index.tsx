@@ -3,16 +3,13 @@ import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import { modelProviderList, modelProviderPresetList } from "#/api/model-provider";
-import type { ModelPreset, ModelProvider } from "#/protocol/model-provider";
+import type { ModelPreset, ModelProvider, ReasoningEffort } from "#/protocol/model-provider";
 import { Button } from "#/shadcn/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -25,9 +22,22 @@ interface ProviderOption {
   models: ModelPreset[];
 }
 
+const reasoningEffortLabels: Record<ReasoningEffort, string> = {
+  none: "不推理",
+  minimal: "最低",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最高",
+};
+
+const defaultReasoningEffort: ReasoningEffort = "high";
+
 export interface ModelSelection {
   providerId: string;
   modelId: string;
+  reasoningEffort: ReasoningEffort | null;
 }
 
 interface ModelSelectorProps {
@@ -45,7 +55,23 @@ function createDefaultSelection(option: ProviderOption | undefined): ModelSelect
   return {
     providerId: option.provider.id,
     modelId: model.modelId,
+    reasoningEffort: getDefaultReasoningEffort(model),
   };
+}
+
+function getDefaultReasoningEffort(model: ModelPreset): ReasoningEffort | null {
+  return model.reasoningEfforts.includes(defaultReasoningEffort)
+    ? defaultReasoningEffort
+    : (model.reasoningEfforts[0] ?? null);
+}
+
+function normalizeReasoningEffort(
+  reasoningEffort: ReasoningEffort | null | undefined,
+  model: ModelPreset,
+) {
+  return reasoningEffort && model.reasoningEfforts.includes(reasoningEffort)
+    ? reasoningEffort
+    : getDefaultReasoningEffort(model);
 }
 
 function normalizeSelection(
@@ -63,11 +89,16 @@ function normalizeSelection(
   return {
     providerId: option.provider.id,
     modelId: model.modelId,
+    reasoningEffort: normalizeReasoningEffort(selection?.reasoningEffort, model),
   };
 }
 
 function isSameSelection(left: ModelSelection | null, right: ModelSelection | null) {
-  return left?.providerId === right?.providerId && left?.modelId === right?.modelId;
+  return (
+    left?.providerId === right?.providerId &&
+    left?.modelId === right?.modelId &&
+    left?.reasoningEffort === right?.reasoningEffort
+  );
 }
 
 export function ModelSelector({ value, onValueChange, disabled }: ModelSelectorProps) {
@@ -124,6 +155,20 @@ export function ModelSelector({ value, onValueChange, disabled }: ModelSelectorP
     onValueChange({
       providerId: selectedOption.provider.id,
       modelId: model.modelId,
+      reasoningEffort: normalizeReasoningEffort(value?.reasoningEffort, model),
+    });
+  };
+
+  const handleReasoningEffortChange = (reasoningEffort: string) => {
+    const effort = selectedModel?.reasoningEfforts.find((item) => item === reasoningEffort);
+    if (!selectedOption || !selectedModel || !effort) {
+      return;
+    }
+
+    onValueChange({
+      providerId: selectedOption.provider.id,
+      modelId: selectedModel.modelId,
+      reasoningEffort: effort,
     });
   };
 
@@ -143,17 +188,16 @@ export function ModelSelector({ value, onValueChange, disabled }: ModelSelectorP
       >
         <BrainIcon />
         <span>{selectedModel?.displayName ?? placeholder}</span>
-        {value && <span className="text-muted-foreground">· 不推理</span>}
+        {value?.reasoningEffort && (
+          <span className="text-muted-foreground">
+            · {reasoningEffortLabels[value.reasoningEffort]}
+          </span>
+        )}
         <ChevronDownIcon className="text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="min-w-64">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>模型配置</DropdownMenuLabel>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
+          <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-0">
             <span>供应商</span>
             <DropdownMenuShortcut>{selectedOption?.provider.providerAlias}</DropdownMenuShortcut>
           </DropdownMenuSubTrigger>
@@ -173,7 +217,7 @@ export function ModelSelector({ value, onValueChange, disabled }: ModelSelectorP
         </DropdownMenuSub>
 
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
+          <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-0">
             <span>模型</span>
             <DropdownMenuShortcut>{selectedModel?.displayName}</DropdownMenuShortcut>
           </DropdownMenuSubTrigger>
@@ -191,6 +235,29 @@ export function ModelSelector({ value, onValueChange, disabled }: ModelSelectorP
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+
+        {selectedModel && selectedModel.reasoningEfforts.length > 0 && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-0">
+              <span>推理强度</span>
+              <DropdownMenuShortcut>
+                {value?.reasoningEffort ? reasoningEffortLabels[value.reasoningEffort] : undefined}
+              </DropdownMenuShortcut>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-36">
+              <DropdownMenuRadioGroup
+                value={value?.reasoningEffort ?? undefined}
+                onValueChange={handleReasoningEffortChange}
+              >
+                {selectedModel.reasoningEfforts.map((effort) => (
+                  <DropdownMenuRadioItem key={effort} value={effort} closeOnClick={false}>
+                    {reasoningEffortLabels[effort]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

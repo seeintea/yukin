@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use super::model_provider::ReasoningEffort;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamRequest {
     pub provider_id: String,
     pub model_id: String,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub content: String,
 }
 
@@ -35,6 +38,8 @@ pub struct TokenUsage {
 
 #[cfg(test)]
 mod tests {
+    use crate::protocol::model_provider::ReasoningEffort;
+
     use super::{StreamEvent, StreamRequest, TokenUsage};
 
     #[test]
@@ -42,12 +47,14 @@ mod tests {
         let request: StreamRequest = serde_json::from_value(serde_json::json!({
             "providerId": "provider-1",
             "modelId": "deepseek-chat",
+            "reasoningEffort": "high",
             "content": "你好"
         }))
         .expect("valid stream request");
 
         assert_eq!(request.provider_id, "provider-1");
         assert_eq!(request.model_id, "deepseek-chat");
+        assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(request.content, "你好");
     }
 
