@@ -109,7 +109,21 @@ pub async fn find(pool: &SqlitePool, id: &str) -> AppResult<Snapshot> {
     })
 }
 
-async fn create(pool: &SqlitePool) -> AppResult<Conversation> {
+pub async fn list(pool: &SqlitePool) -> AppResult<Vec<Conversation>> {
+    let records = sqlx::query_as::<_, ConversationRecord>(
+        r#"
+        SELECT id, title, created_at, updated_at
+        FROM conversations
+        ORDER BY updated_at DESC, id DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(records.into_iter().map(Into::into).collect())
+}
+
+pub async fn create(pool: &SqlitePool) -> AppResult<Conversation> {
     let id = Uuid::now_v7().to_string();
     let record = sqlx::query_as::<_, ConversationRecord>(
         r#"

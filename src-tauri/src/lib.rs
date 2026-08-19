@@ -32,6 +32,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::conversation::conversation_current,
             commands::conversation::conversation_find,
+            commands::conversation::conversation_list,
+            commands::conversation::conversation_create,
             commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,

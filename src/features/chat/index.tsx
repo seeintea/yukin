@@ -2,14 +2,44 @@ import { useEffect, useRef } from "react";
 
 import { ChatInput } from "#/components/chat-input";
 import { Markdown } from "#/components/markdown";
+import type { Conversation } from "#/protocol/conversation";
+import { SidebarInset, SidebarProvider } from "#/shadcn/sidebar";
 
+import { ConversationSidebar } from "./conversation-sidebar";
 import { useChat } from "./use-chat";
 
 interface ChatProps {
   conversationId: string;
+  conversations: Conversation[];
+  isCreatingConversation: boolean;
+  onCreateConversation: () => void;
+  onSelectConversation: (conversationId: string) => void;
 }
 
-export function Chat({ conversationId }: ChatProps) {
+export function Chat({
+  conversationId,
+  conversations,
+  isCreatingConversation,
+  onCreateConversation,
+  onSelectConversation,
+}: ChatProps) {
+  return (
+    <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+      <ConversationSidebar
+        conversations={conversations}
+        selectedConversationId={conversationId}
+        isCreating={isCreatingConversation}
+        onCreate={onCreateConversation}
+        onSelect={onSelectConversation}
+      />
+      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+        <ChatConversation key={conversationId} conversationId={conversationId} />
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
+
+function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">) {
   const { messages, sendMessage, isPending, isSending, isError } = useChat(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -18,7 +48,7 @@ export function Chat({ conversationId }: ChatProps) {
   }, [isSending, messages]);
 
   return (
-    <main className="flex h-screen flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 overflow-y-auto">
         {messages.length > 0 && (
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-10">
@@ -54,6 +84,6 @@ export function Chat({ conversationId }: ChatProps) {
           <ChatInput isPending={isPending || isError} onSubmit={sendMessage} />
         </div>
       </div>
-    </main>
+    </div>
   );
 }

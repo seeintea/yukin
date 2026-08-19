@@ -91,10 +91,15 @@ pub(crate) async fn start(
     sqlx::query(
         r#"
         UPDATE conversations
-        SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        SET title = CASE
+                WHEN title = '新对话' THEN trim(?)
+                ELSE title
+            END,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ?
         "#,
     )
+    .bind(&params.content)
     .bind(&params.conversation_id)
     .execute(&mut *transaction)
     .await?;

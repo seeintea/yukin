@@ -18,3 +18,13 @@ pub async fn conversation_find(
 ) -> AppResult<Snapshot> {
     conversation::find(state.db(), &request.id).await
 }
+
+#[tauri::command]
+pub async fn conversation_list(state: State<'_, AppState>) -> AppResult<Vec<Conversation>> {
+    conversation::list(state.db()).await
+}
+
+#[tauri::command]
+pub async fn conversation_create(state: State<'_, AppState>) -> AppResult<Conversation> {
+    conversation::create(state.db()).await
+}

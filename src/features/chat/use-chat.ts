@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { conversationFind } from "#/api/conversation";
 import { modelResponseStream } from "#/api/model-response";
 import type { ChatInputValue } from "#/components/chat-input";
 import type { ConversationMessage, ConversationSnapshot } from "#/protocol/conversation";
 import { toast } from "#/shadcn/toast";
+
+import { conversationKeys, conversationQueryOptions } from "./queries";
 
 function getErrorMessage(error: unknown) {
   if (
@@ -40,12 +41,8 @@ function createOptimisticMessage(
 
 export function useChat(conversationId: string) {
   const queryClient = useQueryClient();
-  const queryKey = ["conversation", "find", conversationId] as const;
-  const conversationQuery = useQuery({
-    queryKey,
-    queryFn: () => conversationFind({ id: conversationId }),
-    staleTime: Infinity,
-  });
+  const queryKey = conversationKeys.find(conversationId);
+  const conversationQuery = useQuery(conversationQueryOptions(conversationId));
 
   const sendMutation = useMutation({
     mutationFn: async ({ content, selection }: ChatInputValue) => {
@@ -103,7 +100,10 @@ export function useChat(conversationId: string) {
       });
     },
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey }),
+        queryClient.invalidateQueries({ queryKey: conversationKeys.list }),
+      ]);
     },
   });
 
