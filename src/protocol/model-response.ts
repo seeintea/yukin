@@ -1,6 +1,7 @@
 import type { ReasoningEffort } from "./model-provider";
 
 export interface StreamRequest {
+  conversationId: string;
   providerId: string;
   modelId: string;
   reasoningEffort: ReasoningEffort | null;

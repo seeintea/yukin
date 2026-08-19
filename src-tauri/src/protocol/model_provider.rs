@@ -52,6 +52,20 @@ pub enum ReasoningEffort {
     Max,
 }
 
+impl ReasoningEffort {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionPreset {

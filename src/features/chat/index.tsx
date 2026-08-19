@@ -1,14 +1,19 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 
+import { conversationCurrent } from "#/api/conversation";
 import { modelResponseStream } from "#/api/model-response";
 import { ChatInput } from "#/components/chat-input";
 import type { ChatInputValue } from "#/components/chat-input";
 import { Markdown } from "#/components/markdown";
+import type { ConversationMessage, MessageRole, MessageStatus } from "#/protocol/conversation";
 import { toast } from "#/shadcn/toast";
 
-interface Turn {
-  userContent: string;
-  assistantContent: string;
+interface DisplayMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  status: MessageStatus;
 }
 
 function getErrorMessage(error: unknown) {
@@ -25,16 +30,44 @@ function getErrorMessage(error: unknown) {
 }
 
 export function Chat() {
-  const [turn, setTurn] = useState<Turn | null>(null);
+  const conversationQuery = useQuery({
+    queryKey: ["conversation", "current"],
+    queryFn: conversationCurrent,
+    staleTime: Infinity,
+  });
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isPending, setIsPending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isPending && conversationQuery.data) {
+      setMessages(conversationQuery.data.messages.map(toDisplayMessage));
+    }
+  }, [conversationQuery.data, isPending]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: isPending ? "smooth" : "auto" });
+  }, [isPending, messages]);
 
   const handleSubmit = async ({ content, selection }: ChatInputValue) => {
-    setTurn({ userContent: content, assistantContent: "" });
+    const conversationId = conversationQuery.data?.conversation.id;
+    if (!conversationId) {
+      return;
+    }
+
+    const optimisticId = crypto.randomUUID();
+    const assistantId = crypto.randomUUID();
+    setMessages((current) => [
+      ...current,
+      { id: optimisticId, role: "user", content, status: "completed" },
+      { id: assistantId, role: "assistant", content: "", status: "streaming" },
+    ]);
     setIsPending(true);
 
     try {
       await modelResponseStream(
         {
+          conversationId,
           providerId: selection.providerId,
           modelId: selection.modelId,
           reasoningEffort: selection.reasoningEffort,
@@ -45,13 +78,12 @@ export function Chat() {
             return;
           }
 
-          setTurn((current) =>
-            current
-              ? {
-                  ...current,
-                  assistantContent: current.assistantContent + event.data.content,
-                }
-              : current,
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantId
+                ? { ...message, content: message.content + event.data.content }
+                : message,
+            ),
           );
         },
       );
@@ -63,6 +95,7 @@ export function Chat() {
         priority: "high",
       });
     } finally {
+      await conversationQuery.refetch();
       setIsPending(false);
     }
   };
@@ -70,26 +103,52 @@ export function Chat() {
   return (
     <main className="flex h-screen flex-col">
       <div className="flex-1 overflow-y-auto">
-        {turn && (
+        {messages.length > 0 && (
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-10">
-            <div className="ml-auto max-w-[80%] rounded-2xl bg-muted px-4 py-3 whitespace-pre-wrap">
-              {turn.userContent}
-            </div>
-            <div className="max-w-none">
-              {turn.assistantContent ? (
-                <Markdown content={turn.assistantContent} isStreaming={isPending} />
-              ) : isPending ? (
-                "正在生成…"
-              ) : null}
-            </div>
+            {messages.map((message, index) =>
+              message.role === "user" ? (
+                <div
+                  key={message.id}
+                  className="ml-auto max-w-[80%] rounded-2xl bg-muted px-4 py-3 whitespace-pre-wrap"
+                >
+                  {message.content}
+                </div>
+              ) : (
+                <div key={message.id} className="max-w-none">
+                  {message.content ? (
+                    <Markdown
+                      content={message.content}
+                      isStreaming={isPending && index === messages.length - 1}
+                    />
+                  ) : message.status === "streaming" ? (
+                    "正在生成…"
+                  ) : message.status === "failed" ? (
+                    <span className="text-muted-foreground">生成失败</span>
+                  ) : null}
+                </div>
+              ),
+            )}
+            <div ref={bottomRef} />
           </div>
         )}
       </div>
       <div className="shrink-0 px-6 pt-4 pb-6">
         <div className="mx-auto w-full max-w-3xl">
-          <ChatInput isPending={isPending} onSubmit={handleSubmit} />
+          <ChatInput
+            isPending={isPending || conversationQuery.isPending || conversationQuery.isError}
+            onSubmit={handleSubmit}
+          />
         </div>
       </div>
     </main>
   );
+}
+
+function toDisplayMessage(message: ConversationMessage): DisplayMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    status: message.status,
+  };
 }

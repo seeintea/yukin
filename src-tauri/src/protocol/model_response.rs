@@ -5,6 +5,7 @@ use super::model_provider::ReasoningEffort;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamRequest {
+    pub conversation_id: String,
     pub provider_id: String,
     pub model_id: String,
     pub reasoning_effort: Option<ReasoningEffort>,
@@ -45,6 +46,7 @@ mod tests {
     #[test]
     fn deserializes_stream_request() {
         let request: StreamRequest = serde_json::from_value(serde_json::json!({
+            "conversationId": "conversation-1",
             "providerId": "provider-1",
             "modelId": "deepseek-chat",
             "reasoningEffort": "high",
@@ -52,6 +54,7 @@ mod tests {
         }))
         .expect("valid stream request");
 
+        assert_eq!(request.conversation_id, "conversation-1");
         assert_eq!(request.provider_id, "provider-1");
         assert_eq!(request.model_id, "deepseek-chat");
         assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));

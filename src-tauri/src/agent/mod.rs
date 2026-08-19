@@ -58,6 +58,7 @@ pub struct Message {
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     User,
+    Assistant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

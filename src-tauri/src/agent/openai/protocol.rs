@@ -212,6 +212,38 @@ mod tests {
     }
 
     #[test]
+    fn serializes_multi_turn_messages_in_order() {
+        let request = ChatCompletionRequest::streaming(CompletionRequest::new(
+            "deepseek-v4-flash".into(),
+            vec![
+                Message {
+                    role: Role::User,
+                    content: "我叫 Yukin".into(),
+                },
+                Message {
+                    role: Role::Assistant,
+                    content: "记住了".into(),
+                },
+                Message {
+                    role: Role::User,
+                    content: "我叫什么？".into(),
+                },
+            ],
+        ));
+
+        let value = serde_json::to_value(request).expect("serializable OpenAI request");
+
+        assert_eq!(
+            value["messages"],
+            serde_json::json!([
+                { "role": "user", "content": "我叫 Yukin" },
+                { "role": "assistant", "content": "记住了" },
+                { "role": "user", "content": "我叫什么？" }
+            ])
+        );
+    }
+
+    #[test]
     fn deserializes_text_delta_chunk_and_ignores_unused_fields() {
         let chunk: ChatCompletionChunk = serde_json::from_value(serde_json::json!({
             "id": "chatcmpl-123",
