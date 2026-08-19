@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as InitializeRouteImport } from './routes/initialize'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
 
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
@@ -22,31 +24,48 @@ const InitializeRoute = InitializeRouteImport.update({
   path: '/initialize',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/chat': typeof ChatRoute
   '/initialize': typeof InitializeRoute
+  '/settings': typeof SettingsRouteWithChildren
+  '/settings/providers': typeof SettingsProvidersRoute
 }
 export interface FileRoutesByTo {
   '/chat': typeof ChatRoute
   '/initialize': typeof InitializeRoute
+  '/settings': typeof SettingsRouteWithChildren
+  '/settings/providers': typeof SettingsProvidersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/chat': typeof ChatRoute
   '/initialize': typeof InitializeRoute
+  '/settings': typeof SettingsRouteWithChildren
+  '/settings/providers': typeof SettingsProvidersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/chat' | '/initialize'
+  fullPaths: '/chat' | '/initialize' | '/settings' | '/settings/providers'
   fileRoutesByTo: FileRoutesByTo
-  to: '/chat' | '/initialize'
-  id: '__root__' | '/chat' | '/initialize'
+  to: '/chat' | '/initialize' | '/settings' | '/settings/providers'
+  id: '__root__' | '/chat' | '/initialize' | '/settings' | '/settings/providers'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRoute
   InitializeRoute: typeof InitializeRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +84,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InitializeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/providers': {
+      id: '/settings/providers'
+      path: '/providers'
+      fullPath: '/settings/providers'
+      preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
   }
 }
+
+interface SettingsRouteChildren {
+  SettingsProvidersRoute: typeof SettingsProvidersRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsProvidersRoute: SettingsProvidersRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRoute,
   InitializeRoute: InitializeRoute,
+  SettingsRoute: SettingsRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

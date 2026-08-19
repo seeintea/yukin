@@ -1,10 +1,12 @@
-import { MessageSquareIcon, SquarePenIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { MessageSquareIcon, SettingsIcon, SquarePenIcon } from "lucide-react";
 
 import type { Conversation } from "#/protocol/conversation";
 import { ScrollArea } from "#/shadcn/scroll-area";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -64,6 +66,16 @@ export function ConversationSidebar({
           </SidebarGroup>
         </ScrollArea>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton render={<Link to="/settings/providers" />}>
+              <SettingsIcon />
+              <span>设置</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }
