@@ -27,3 +27,12 @@ export interface ConversationSnapshot {
 export interface FindRequest {
   id: string;
 }
+
+export interface RenameRequest {
+  id: string;
+  title: string;
+}
+
+export interface DeleteRequest {
+  id: string;
+}

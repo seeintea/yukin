@@ -58,3 +58,13 @@ export interface ReplaceCredentialRequest {
 export interface DeleteRequest {
   id: string;
 }
+
+export interface TestConnectionRequest {
+  providerId: string;
+  modelId: string;
+}
+
+export interface TestConnectionResponse {
+  modelId: string;
+  latencyMs: number;
+}

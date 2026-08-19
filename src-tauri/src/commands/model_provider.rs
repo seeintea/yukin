@@ -4,7 +4,7 @@ use crate::{
     model_provider::catalog,
     protocol::model_provider::{
         CreateRequest, DeleteRequest, FindRequest, ModelProvider, ModelProviderPreset,
-        ReplaceCredentialRequest, UpdateRequest,
+        ReplaceCredentialRequest, TestConnectionRequest, TestConnectionResponse, UpdateRequest,
     },
     storage::model_provider::{self, UpdateParams},
     workflows::model_provider as model_provider_workflow,
@@ -68,4 +68,12 @@ pub async fn model_provider_delete(
     request: DeleteRequest,
 ) -> AppResult<()> {
     model_provider_workflow::delete(state.db(), &request.id).await
+}
+
+#[tauri::command]
+pub async fn model_provider_test_connection(
+    state: State<'_, AppState>,
+    request: TestConnectionRequest,
+) -> AppResult<TestConnectionResponse> {
+    model_provider_workflow::test_connection(state.db(), state.http(), request).await
 }

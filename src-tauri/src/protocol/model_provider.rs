@@ -149,9 +149,26 @@ pub struct DeleteRequest {
     pub id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestConnectionRequest {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestConnectionResponse {
+    pub model_id: String,
+    pub latency_ms: u64,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ApiFormat, CreateRequest, ModelPreset, ModelProvider, ReasoningEffort};
+    use super::{
+        ApiFormat, CreateRequest, ModelPreset, ModelProvider, ReasoningEffort,
+        TestConnectionRequest,
+    };
 
     #[test]
     fn deserializes_camel_case_create_request() {
@@ -208,5 +225,17 @@ mod tests {
             value["reasoningEfforts"],
             serde_json::json!(["high", "max"])
         );
+    }
+
+    #[test]
+    fn deserializes_connection_test_request() {
+        let request: TestConnectionRequest = serde_json::from_value(serde_json::json!({
+            "providerId": "provider-1",
+            "modelId": "deepseek-v4-flash"
+        }))
+        .expect("valid connection test request");
+
+        assert_eq!(request.provider_id, "provider-1");
+        assert_eq!(request.model_id, "deepseek-v4-flash");
     }
 }

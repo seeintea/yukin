@@ -40,6 +40,8 @@ pub fn run() {
             commands::conversation::conversation_list,
             commands::conversation::conversation_create,
             commands::conversation::conversation_message_list,
+            commands::conversation::conversation_rename,
+            commands::conversation::conversation_delete,
             commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,
@@ -47,6 +49,7 @@ pub fn run() {
             commands::model_provider::model_provider_update,
             commands::model_provider::model_provider_credential_replace,
             commands::model_provider::model_provider_delete,
+            commands::model_provider::model_provider_test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running yukin.");

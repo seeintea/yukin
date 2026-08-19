@@ -18,6 +18,8 @@ pub enum AppError {
     Keyring(#[from] keyring::Error),
     #[error("run state: {0}")]
     RunState(String),
+    #[error("validation: {0}")]
+    Validation(String),
     #[error("{0}")]
     Other(String),
 }
@@ -33,6 +35,7 @@ impl AppError {
             Self::Tauri(_) => "tauri",
             Self::Keyring(_) => "keyring",
             Self::RunState(_) => "run_state",
+            Self::Validation(_) => "validation",
             Self::Other(_) => "other",
         }
     }
@@ -95,5 +98,14 @@ mod tests {
             value["message"],
             "agent: agent reached the maximum model steps"
         );
+    }
+
+    #[test]
+    fn serializes_validation_error_code() {
+        let value = serde_json::to_value(AppError::Validation("invalid title".into()))
+            .expect("serializable validation error");
+
+        assert_eq!(value["code"], "validation");
+        assert_eq!(value["message"], "validation: invalid title");
     }
 }

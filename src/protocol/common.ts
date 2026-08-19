@@ -27,6 +27,7 @@ export type AppErrorCode =
   | "tauri"
   | "keyring"
   | "run_state"
+  | "validation"
   | "other";
 
 export interface AppError {

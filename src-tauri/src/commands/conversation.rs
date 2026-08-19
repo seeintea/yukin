@@ -1,8 +1,11 @@
 use tauri::State;
 
 use crate::{
-    protocol::conversation::{Conversation, FindRequest, Message, Snapshot},
+    protocol::conversation::{
+        Conversation, DeleteRequest, FindRequest, Message, RenameRequest, Snapshot,
+    },
     storage::conversation,
+    workflows::conversation as conversation_workflow,
     AppResult, AppState,
 };
 
@@ -35,4 +38,20 @@ pub async fn conversation_message_list(
     request: FindRequest,
 ) -> AppResult<Vec<Message>> {
     conversation::list_messages(state.db(), &request.id).await
+}
+
+#[tauri::command]
+pub async fn conversation_rename(
+    state: State<'_, AppState>,
+    request: RenameRequest,
+) -> AppResult<Conversation> {
+    conversation_workflow::rename(state.db(), request).await
+}
+
+#[tauri::command]
+pub async fn conversation_delete(
+    state: State<'_, AppState>,
+    request: DeleteRequest,
+) -> AppResult<()> {
+    conversation_workflow::delete(state.db(), &request.id).await
 }

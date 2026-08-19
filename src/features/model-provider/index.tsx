@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRoundIcon, MoreHorizontalIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import {
+  KeyRoundIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlugZapIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useId, useRef, useState } from "react";
 
 import {
@@ -48,6 +55,7 @@ import { Skeleton } from "#/shadcn/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/shadcn/table";
 import { toast } from "#/shadcn/toast";
 
+import { ConnectionTestDialog } from "./connection-test-dialog";
 import { ProviderCredentialForm, ProviderUpdateForm } from "./forms";
 import {
   modelProviderKeys,
@@ -95,6 +103,7 @@ export function ModelProviderSettings() {
   const [editingProvider, setEditingProvider] = useState<ModelProvider | null>(null);
   const [credentialProvider, setCredentialProvider] = useState<ModelProvider | null>(null);
   const [deletingProvider, setDeletingProvider] = useState<ModelProvider | null>(null);
+  const [testingProvider, setTestingProvider] = useState<ModelProvider | null>(null);
 
   const refreshProviders = () =>
     queryClient.invalidateQueries({ queryKey: modelProviderKeys.list });
@@ -289,6 +298,10 @@ export function ModelProviderSettings() {
                           <MoreHorizontalIcon />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setTestingProvider(provider)}>
+                            <PlugZapIcon />
+                            测试连接
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setEditingProvider(provider)}>
                             <PencilIcon />
                             编辑配置
@@ -349,6 +362,17 @@ export function ModelProviderSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {testingProvider && (
+        <ConnectionTestDialog
+          key={testingProvider.id}
+          provider={testingProvider}
+          preset={presetsQuery.data?.find(
+            (preset) => preset.providerKey === testingProvider.providerKey,
+          )}
+          onClose={() => setTestingProvider(null)}
+        />
+      )}
 
       <Dialog
         open={credentialProvider !== null}

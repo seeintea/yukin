@@ -51,3 +51,33 @@ pub struct Snapshot {
 pub struct FindRequest {
     pub id: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameRequest {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteRequest {
+    pub id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RenameRequest;
+
+    #[test]
+    fn deserializes_conversation_rename_request() {
+        let request: RenameRequest = serde_json::from_value(serde_json::json!({
+            "id": "conversation-1",
+            "title": "新的标题"
+        }))
+        .expect("valid rename request");
+
+        assert_eq!(request.id, "conversation-1");
+        assert_eq!(request.title, "新的标题");
+    }
+}

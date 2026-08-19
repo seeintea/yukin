@@ -17,6 +17,10 @@ interface ChatProps {
   isCreatingConversation: boolean;
   onCreateConversation: () => void;
   onSelectConversation: (conversationId: string) => void;
+  onRenameConversation: (conversationId: string, title: string) => Promise<void>;
+  onDeleteConversation: (conversationId: string) => Promise<void>;
+  renamingConversationId: string | null;
+  deletingConversationId: string | null;
 }
 
 export function Chat({
@@ -25,6 +29,10 @@ export function Chat({
   isCreatingConversation,
   onCreateConversation,
   onSelectConversation,
+  onRenameConversation,
+  onDeleteConversation,
+  renamingConversationId,
+  deletingConversationId,
 }: ChatProps) {
   return (
     <SidebarProvider className="h-svh min-h-0 overflow-hidden">
@@ -34,6 +42,10 @@ export function Chat({
         isCreating={isCreatingConversation}
         onCreate={onCreateConversation}
         onSelect={onSelectConversation}
+        onRename={onRenameConversation}
+        onDelete={onDeleteConversation}
+        renamingConversationId={renamingConversationId}
+        deletingConversationId={deletingConversationId}
       />
       <SidebarInset className="h-svh min-w-0 overflow-hidden">
         <ChatConversation key={conversationId} conversationId={conversationId} />

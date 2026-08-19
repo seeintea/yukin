@@ -7,6 +7,8 @@ import type {
   ModelProvider,
   ModelProviderPreset,
   ReplaceCredentialRequest,
+  TestConnectionRequest,
+  TestConnectionResponse,
   UpdateRequest,
 } from "#/protocol/model-provider";
 
@@ -38,4 +40,10 @@ export async function modelProviderCredentialReplace(
 
 export async function modelProviderDelete(request: DeleteRequest): Promise<void> {
   await invoke("model_provider_delete", { request });
+}
+
+export function modelProviderTestConnection(
+  request: TestConnectionRequest,
+): Promise<TestConnectionResponse> {
+  return invoke("model_provider_test_connection", { request });
 }
