@@ -4,6 +4,8 @@ use std::result::Result;
 pub enum AppError {
     #[error("model: {0}")]
     Model(#[from] crate::agent::ModelError),
+    #[error("agent: {0}")]
+    Agent(#[from] crate::agent::RuntimeError),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("db: {0}")]
@@ -24,6 +26,7 @@ impl AppError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::Model(error) => error.code(),
+            Self::Agent(error) => error.code(),
             Self::Io(_) => "io",
             Self::Db(_) => "db",
             Self::Migrate(_) => "migrate",
@@ -79,5 +82,18 @@ mod tests {
 
         assert_eq!(value["code"], "run_state");
         assert_eq!(value["message"], "run state: run is not active");
+    }
+
+    #[test]
+    fn serializes_agent_limit_error_code() {
+        let error = AppError::from(crate::agent::RuntimeError::StepLimit);
+
+        let value = serde_json::to_value(error).expect("serializable agent error");
+
+        assert_eq!(value["code"], "agent_step_limit");
+        assert_eq!(
+            value["message"],
+            "agent: agent reached the maximum model steps"
+        );
     }
 }

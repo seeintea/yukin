@@ -156,6 +156,18 @@ impl<S> CompletionState<S> {
         if let Some(content) = choice.delta.content.filter(|content| !content.is_empty()) {
             self.pending.push_back(StreamEvent::TextDelta { content });
         }
+        for tool_call in choice.delta.tool_calls {
+            let (name, arguments) = tool_call
+                .function
+                .map(|function| (function.name, function.arguments.unwrap_or_default()))
+                .unwrap_or_default();
+            self.pending.push_back(StreamEvent::ToolCallDelta {
+                index: tool_call.index,
+                id: tool_call.id,
+                name,
+                arguments,
+            });
+        }
 
         Ok(())
     }
@@ -255,10 +267,7 @@ mod tests {
         let client = Client::new();
         let mut completion_request = CompletionRequest::new(
             "deepseek-v4-pro".into(),
-            vec![Message {
-                role: Role::User,
-                content: "问题".into(),
-            }],
+            vec![Message::text(Role::User, "问题".into())],
         );
         completion_request.thinking = Some(ThinkingMode::Enabled);
         completion_request.reasoning_effort = Some(ReasoningEffort::Max);
@@ -325,10 +334,7 @@ mod tests {
                 "test-key",
                 CompletionRequest::new(
                     "deepseek-chat".into(),
-                    vec![Message {
-                        role: Role::User,
-                        content: "你好".into(),
-                    }],
+                    vec![Message::text(Role::User, "你好".into())],
                 ),
             )
             .await
@@ -381,6 +387,21 @@ mod tests {
             state.pending.pop_front(),
             Some(StreamEvent::TextDelta {
                 content: "你好".into()
+            })
+        );
+
+        state
+            .consume(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"current_time","arguments":"{}"}}]},"finish_reason":null}]}"#,
+            )
+            .expect("valid tool call delta");
+        assert_eq!(
+            state.pending.pop_front(),
+            Some(StreamEvent::ToolCallDelta {
+                index: 0,
+                id: Some("call-1".into()),
+                name: Some("current_time".into()),
+                arguments: "{}".into(),
             })
         );
 

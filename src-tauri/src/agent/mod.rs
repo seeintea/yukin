@@ -1,9 +1,11 @@
 mod openai;
 mod sse;
+pub(crate) mod tools;
 
 use futures_util::stream::BoxStream;
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub use crate::protocol::model_provider::ApiFormat;
 
@@ -48,10 +50,87 @@ impl ModelError {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum RuntimeError {
+    #[error("agent reached the maximum model steps")]
+    StepLimit,
+    #[error("agent reached the maximum tool calls")]
+    ToolCallLimit,
+    #[error("tool is not registered: {0}")]
+    ToolNotFound(String),
+    #[error("invalid arguments for tool {name}: {message}")]
+    InvalidToolArguments { name: String, message: String },
+    #[error("tool call timed out: {0}")]
+    ToolTimeout(String),
+    #[error("tool output exceeded the size limit: {0}")]
+    ToolOutputLimit(String),
+    #[error("repeated tool call detected: {0}")]
+    RepeatedToolCall(String),
+    #[error("tool execution failed for {name}: {message}")]
+    ToolExecution { name: String, message: String },
+}
+
+impl RuntimeError {
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::StepLimit => "agent_step_limit",
+            Self::ToolCallLimit => "agent_tool_call_limit",
+            Self::ToolNotFound(_) => "tool_not_found",
+            Self::InvalidToolArguments { .. } => "tool_invalid_arguments",
+            Self::ToolTimeout(_) => "tool_timeout",
+            Self::ToolOutputLimit(_) => "tool_output_limit",
+            Self::RepeatedToolCall(_) => "tool_repeated_call",
+            Self::ToolExecution { .. } => "tool_execution",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+}
+
+impl Message {
+    pub fn text(role: Role, content: String) -> Self {
+        Self {
+            role,
+            content,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            reasoning_content: None,
+        }
+    }
+
+    pub fn assistant_tool_calls(
+        content: String,
+        reasoning_content: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    ) -> Self {
+        Self {
+            role: Role::Assistant,
+            content,
+            tool_calls,
+            tool_call_id: None,
+            reasoning_content,
+        }
+    }
+
+    pub fn tool(tool_call_id: String, content: String) -> Self {
+        Self {
+            role: Role::Tool,
+            content,
+            tool_calls: Vec::new(),
+            tool_call_id: Some(tool_call_id),
+            reasoning_content: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -59,6 +138,34 @@ pub struct Message {
 pub enum Role {
     User,
     Assistant,
+    Tool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: ToolCallType,
+    pub function: ToolCallFunction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallType {
+    Function,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +205,7 @@ pub struct CompletionRequest {
     pub messages: Vec<Message>,
     pub thinking: Option<ThinkingMode>,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub tools: Vec<ToolDefinition>,
 }
 
 impl CompletionRequest {
@@ -107,6 +215,7 @@ impl CompletionRequest {
             messages,
             thinking: None,
             reasoning_effort: None,
+            tools: Vec::new(),
         }
     }
 }
@@ -133,6 +242,12 @@ pub enum StreamEvent {
     },
     TextDelta {
         content: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments: String,
     },
     Completed {
         finish_reason: Option<String>,

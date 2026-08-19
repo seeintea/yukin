@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 
 import { ChatInput } from "#/components/chat-input";
 import { Markdown } from "#/components/markdown";
+import type { ActiveToolCall } from "#/protocol/agent-run";
 import type { Conversation } from "#/protocol/conversation";
+import { Card, CardContent, CardHeader, CardTitle } from "#/shadcn/card";
 import { SidebarInset, SidebarProvider } from "#/shadcn/sidebar";
 
 import { ConversationSidebar } from "./conversation-sidebar";
@@ -46,6 +48,7 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
     cancelRun,
     canCancel,
     phase,
+    toolCalls,
     isPending,
     isSending,
     isCancelling,
@@ -91,6 +94,9 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
                 </div>
               ),
             )}
+            {toolCalls.map((toolCall) => (
+              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+            ))}
             <div ref={bottomRef} />
           </div>
         )}
@@ -104,6 +110,38 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolCallCard({ toolCall }: { toolCall: ActiveToolCall }) {
+  const status = {
+    requested: "等待执行",
+    running: "执行中…",
+    completed: "已完成",
+    failed: "执行失败",
+  }[toolCall.status];
+
+  return (
+    <Card size="sm" className="max-w-xl bg-muted/30">
+      <CardHeader className="grid-cols-[1fr_auto]">
+        <CardTitle>{toolCall.name}</CardTitle>
+        <span className="text-xs text-muted-foreground">{status}</span>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs">
+        <ToolCallValue label="参数" value={toolCall.arguments} />
+        {toolCall.result !== null && <ToolCallValue label="结果" value={toolCall.result} />}
+        {toolCall.errorMessage && <p className="text-destructive">{toolCall.errorMessage}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ToolCallValue({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div>
+      <div className="mb-1 text-muted-foreground">{label}</div>
+      <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(value, null, 2)}</pre>
     </div>
   );
 }

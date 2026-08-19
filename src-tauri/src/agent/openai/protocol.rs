@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{CompletionRequest, Message, ReasoningEffort, ThinkingMode};
+use crate::agent::{CompletionRequest, Message, ReasoningEffort, ThinkingMode, ToolDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(super) struct ChatCompletionRequest {
@@ -13,6 +13,8 @@ pub(super) struct ChatCompletionRequest {
     pub thinking: Option<Thinking>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortValue>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<Tool>,
 }
 
 impl ChatCompletionRequest {
@@ -26,6 +28,7 @@ impl ChatCompletionRequest {
             }),
             thinking: request.thinking.map(Into::into),
             reasoning_effort: request.reasoning_effort.map(Into::into),
+            tools: request.tools.into_iter().map(Into::into).collect(),
         }
     }
 
@@ -37,6 +40,34 @@ impl ChatCompletionRequest {
             stream_options: None,
             thinking: request.thinking.map(Into::into),
             reasoning_effort: request.reasoning_effort.map(Into::into),
+            tools: request.tools.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(super) struct Tool {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub function: FunctionDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(super) struct FunctionDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+impl From<ToolDefinition> for Tool {
+    fn from(tool: ToolDefinition) -> Self {
+        Self {
+            kind: "function",
+            function: FunctionDefinition {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.input_schema,
+            },
         }
     }
 }
@@ -114,6 +145,21 @@ pub(super) struct Delta {
     pub content: Option<String>,
     #[serde(default)]
     pub reasoning_content: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<ToolCallDelta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(super) struct ToolCallDelta {
+    pub index: usize,
+    pub id: Option<String>,
+    pub function: Option<FunctionCallDelta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(super) struct FunctionCallDelta {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -155,7 +201,10 @@ pub(super) struct ErrorBody {
 
 #[cfg(test)]
 mod tests {
-    use crate::agent::{CompletionRequest, Message, ReasoningEffort, Role, ThinkingMode};
+    use crate::agent::{
+        CompletionRequest, Message, ReasoningEffort, Role, ThinkingMode, ToolCall,
+        ToolCallFunction, ToolCallType, ToolDefinition,
+    };
 
     use super::{ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, Delta, Usage};
 
@@ -163,10 +212,7 @@ mod tests {
     fn serializes_streaming_chat_completion_request() {
         let mut request = CompletionRequest::new(
             "deepseek-v4-pro".into(),
-            vec![Message {
-                role: Role::User,
-                content: "Hello".into(),
-            }],
+            vec![Message::text(Role::User, "Hello".into())],
         );
         request.thinking = Some(ThinkingMode::Enabled);
         request.reasoning_effort = Some(ReasoningEffort::Max);
@@ -193,10 +239,7 @@ mod tests {
     fn serializes_non_streaming_request_without_stream_options() {
         let request = ChatCompletionRequest::non_streaming(CompletionRequest::new(
             "deepseek-v4-flash".into(),
-            vec![Message {
-                role: Role::User,
-                content: "Hello".into(),
-            }],
+            vec![Message::text(Role::User, "Hello".into())],
         ));
 
         let value = serde_json::to_value(request).expect("serializable OpenAI request");
@@ -216,18 +259,9 @@ mod tests {
         let request = ChatCompletionRequest::streaming(CompletionRequest::new(
             "deepseek-v4-flash".into(),
             vec![
-                Message {
-                    role: Role::User,
-                    content: "我叫 Yukin".into(),
-                },
-                Message {
-                    role: Role::Assistant,
-                    content: "记住了".into(),
-                },
-                Message {
-                    role: Role::User,
-                    content: "我叫什么？".into(),
-                },
+                Message::text(Role::User, "我叫 Yukin".into()),
+                Message::text(Role::Assistant, "记住了".into()),
+                Message::text(Role::User, "我叫什么？".into()),
             ],
         ));
 
@@ -240,6 +274,67 @@ mod tests {
                 { "role": "assistant", "content": "记住了" },
                 { "role": "user", "content": "我叫什么？" }
             ])
+        );
+    }
+
+    #[test]
+    fn serializes_tool_definition_call_and_result() {
+        let tool_call = ToolCall {
+            id: "call-1".into(),
+            kind: ToolCallType::Function,
+            function: ToolCallFunction {
+                name: "current_time".into(),
+                arguments: r#"{"utcOffset":"+08:00"}"#.into(),
+            },
+        };
+        let mut request = CompletionRequest::new(
+            "deepseek-chat".into(),
+            vec![
+                Message::assistant_tool_calls("".into(), None, vec![tool_call]),
+                Message::tool("call-1".into(), r#"{"dateTime":"now"}"#.into()),
+            ],
+        );
+        request.tools.push(ToolDefinition {
+            name: "current_time".into(),
+            description: "Get the current time".into(),
+            input_schema: serde_json::json!({ "type": "object" }),
+        });
+
+        let value = serde_json::to_value(ChatCompletionRequest::streaming(request))
+            .expect("serializable tool request");
+
+        assert_eq!(value["tools"][0]["type"], "function");
+        assert_eq!(value["tools"][0]["function"]["name"], "current_time");
+        assert_eq!(value["messages"][0]["tool_calls"][0]["id"], "call-1");
+        assert_eq!(value["messages"][1]["role"], "tool");
+        assert_eq!(value["messages"][1]["tool_call_id"], "call-1");
+    }
+
+    #[test]
+    fn deserializes_streamed_tool_call_delta() {
+        let chunk: ChatCompletionChunk = serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call-1",
+                        "function": { "name": "current_time", "arguments": "{\\\"utcOffset\\\":" }
+                    }]
+                },
+                "finish_reason": null
+            }]
+        }))
+        .expect("valid tool call delta");
+
+        let tool_call = &chunk.choices[0].delta.tool_calls[0];
+        assert_eq!(tool_call.index, 0);
+        assert_eq!(tool_call.id.as_deref(), Some("call-1"));
+        assert_eq!(
+            tool_call
+                .function
+                .as_ref()
+                .and_then(|function| function.name.as_deref()),
+            Some("current_time")
         );
     }
 
@@ -269,6 +364,7 @@ mod tests {
             Delta {
                 content: Some("你好".into()),
                 reasoning_content: None,
+                tool_calls: Vec::new(),
             }
         );
         assert_eq!(chunk.choices[0].finish_reason, None);

@@ -3,7 +3,12 @@ import { useEffect, useMemo, useReducer, useRef } from "react";
 
 import { agentRunCancel, agentRunSnapshot, agentRunStart } from "#/api/agent-run";
 import type { ChatInputValue } from "#/components/chat-input";
-import type { AgentRunEvent, AgentRunStartResponse, RunStatus } from "#/protocol/agent-run";
+import type {
+  ActiveToolCall,
+  AgentRunEvent,
+  AgentRunStartResponse,
+  RunStatus,
+} from "#/protocol/agent-run";
 import type { ConversationMessage, ConversationSnapshot } from "#/protocol/conversation";
 import { toast } from "#/shadcn/toast";
 
@@ -16,6 +21,7 @@ interface ActiveRunState {
   status: ActiveStatus;
   phase: "thinking" | "responding" | null;
   lastSequence: number;
+  toolCalls: ActiveToolCall[];
 }
 
 type ActiveRunAction =
@@ -28,6 +34,7 @@ const initialActiveRun: ActiveRunState = {
   status: "idle",
   phase: null,
   lastSequence: 0,
+  toolCalls: [],
 };
 
 function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): ActiveRunState {
@@ -35,7 +42,7 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
     if (state.runId === action.runId && state.lastSequence > 0) {
       return state;
     }
-    return { runId: action.runId, status: "pending", phase: null, lastSequence: 0 };
+    return { runId: action.runId, status: "pending", phase: null, lastSequence: 0, toolCalls: [] };
   }
   if (action.type === "snapshot") {
     return { ...state, runId: action.runId, status: action.status };
@@ -46,6 +53,7 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
 
   let status = state.status;
   let phase = state.phase;
+  let toolCalls = state.toolCalls;
   switch (action.event.event) {
     case "run_started":
       status = "running";
@@ -53,6 +61,46 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
     case "phase_changed":
       status = "running";
       phase = action.event.data.phase;
+      break;
+    case "tool_call_requested":
+      {
+        const { toolCallId, name, arguments: toolArguments } = action.event.data;
+        toolCalls = [
+          ...toolCalls.filter((toolCall) => toolCall.id !== toolCallId),
+          {
+            id: toolCallId,
+            name,
+            arguments: toolArguments,
+            status: "requested",
+            result: null,
+            errorMessage: null,
+          },
+        ];
+      }
+      break;
+    case "tool_call_started":
+      {
+        const { toolCallId } = action.event.data;
+        toolCalls = toolCalls.map((toolCall) =>
+          toolCall.id === toolCallId ? { ...toolCall, status: "running" } : toolCall,
+        );
+      }
+      break;
+    case "tool_call_completed":
+      {
+        const { toolCallId, result } = action.event.data;
+        toolCalls = toolCalls.map((toolCall) =>
+          toolCall.id === toolCallId ? { ...toolCall, status: "completed", result } : toolCall,
+        );
+      }
+      break;
+    case "tool_call_failed":
+      {
+        const { toolCallId, errorMessage } = action.event.data;
+        toolCalls = toolCalls.map((toolCall) =>
+          toolCall.id === toolCallId ? { ...toolCall, status: "failed", errorMessage } : toolCall,
+        );
+      }
       break;
     case "run_completed":
       status = "completed";
@@ -70,6 +118,7 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
     status,
     phase,
     lastSequence: action.event.sequence,
+    toolCalls,
   };
 }
 
@@ -304,6 +353,7 @@ export function useChat(conversationId: string) {
     cancelRun: cancelMutation.mutate,
     canCancel: activeRunId !== null,
     phase: activeRun.phase,
+    toolCalls: activeRun.toolCalls,
     isPending: conversationQuery.isPending || isSending,
     isSending,
     isCancelling: cancelMutation.isPending,

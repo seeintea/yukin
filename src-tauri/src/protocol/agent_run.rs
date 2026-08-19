@@ -112,6 +112,23 @@ pub enum EventKind {
         completion_tokens: u64,
         total_tokens: u64,
     },
+    ToolCallRequested {
+        tool_call_id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallStarted {
+        tool_call_id: String,
+    },
+    ToolCallCompleted {
+        tool_call_id: String,
+        result: serde_json::Value,
+    },
+    ToolCallFailed {
+        tool_call_id: String,
+        error_code: String,
+        error_message: String,
+    },
     RunCompleted {},
     RunFailed {
         error_code: String,
