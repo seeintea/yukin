@@ -54,6 +54,7 @@ import {
 import { Skeleton } from "#/shadcn/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/shadcn/table";
 import { toast } from "#/shadcn/toast";
+import { showErrorToast } from "#/utils/toast";
 
 import { ConnectionTestDialog } from "./connection-test-dialog";
 import { ProviderCredentialForm, ProviderUpdateForm } from "./forms";
@@ -61,25 +62,13 @@ import {
   modelProviderKeys,
   modelProviderListQueryOptions,
   modelProviderPresetListQueryOptions,
+  upsertModelProvider,
 } from "./queries";
 
 const apiFormatLabels: Record<ApiFormat, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
 };
-
-function getErrorMessage(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-
-  return "请稍后重试";
-}
 
 function formatUpdatedAt(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -105,39 +94,31 @@ export function ModelProviderSettings() {
   const [deletingProvider, setDeletingProvider] = useState<ModelProvider | null>(null);
   const [testingProvider, setTestingProvider] = useState<ModelProvider | null>(null);
 
-  const refreshProviders = () =>
-    queryClient.invalidateQueries({ queryKey: modelProviderKeys.list });
   const createMutation = useMutation({
     mutationFn: modelProviderCreate,
-    onSuccess: async () => {
-      await refreshProviders();
+    onSuccess: (provider) => {
+      queryClient.setQueryData<ModelProvider[]>(modelProviderKeys.list, (providers = []) =>
+        upsertModelProvider(providers, provider),
+      );
       setCreateOpen(false);
       createFormRef.current?.reset();
       toast.add({ title: "模型供应商创建成功", type: "success" });
     },
     onError: (error) => {
-      toast.add({
-        title: "模型供应商创建失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("模型供应商创建失败", error);
     },
   });
   const updateMutation = useMutation({
     mutationFn: modelProviderUpdate,
-    onSuccess: async () => {
-      await refreshProviders();
+    onSuccess: (provider) => {
+      queryClient.setQueryData<ModelProvider[]>(modelProviderKeys.list, (providers = []) =>
+        upsertModelProvider(providers, provider),
+      );
       setEditingProvider(null);
       toast.add({ title: "模型供应商更新成功", type: "success" });
     },
     onError: (error) => {
-      toast.add({
-        title: "模型供应商更新失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("模型供应商更新失败", error);
     },
   });
   const credentialMutation = useMutation({
@@ -147,28 +128,20 @@ export function ModelProviderSettings() {
       toast.add({ title: "API Key 更新成功", type: "success" });
     },
     onError: (error) => {
-      toast.add({
-        title: "API Key 更新失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("API Key 更新失败", error);
     },
   });
   const deleteMutation = useMutation({
     mutationFn: modelProviderDelete,
-    onSuccess: async () => {
-      await refreshProviders();
+    onSuccess: (_, request) => {
+      queryClient.setQueryData<ModelProvider[]>(modelProviderKeys.list, (providers = []) =>
+        providers.filter((provider) => provider.id !== request.id),
+      );
       setDeletingProvider(null);
       toast.add({ title: "模型供应商已删除", type: "success" });
     },
     onError: (error) => {
-      toast.add({
-        title: "模型供应商删除失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("模型供应商删除失败", error);
     },
   });
 

@@ -73,15 +73,7 @@ impl TryFrom<RunRecord> for Run {
     type Error = AppError;
 
     fn try_from(record: RunRecord) -> Result<Self, Self::Error> {
-        let status = match record.status.as_str() {
-            "pending" => RunStatus::Pending,
-            "running" => RunStatus::Running,
-            "waiting_approval" => RunStatus::WaitingApproval,
-            "completed" => RunStatus::Completed,
-            "failed" => RunStatus::Failed,
-            "cancelled" => RunStatus::Cancelled,
-            value => return Err(AppError::Other(format!("invalid run status: {value}"))),
-        };
+        let status = RunStatus::try_from(record.status.as_str()).map_err(AppError::Other)?;
 
         Ok(Self {
             id: record.id,
@@ -111,13 +103,7 @@ impl TryFrom<AssistantMessageRecord> for Message {
     type Error = AppError;
 
     fn try_from(record: AssistantMessageRecord) -> Result<Self, Self::Error> {
-        let status = match record.status.as_str() {
-            "streaming" => MessageStatus::Streaming,
-            "completed" => MessageStatus::Completed,
-            "failed" => MessageStatus::Failed,
-            "cancelled" => MessageStatus::Cancelled,
-            value => return Err(AppError::Other(format!("invalid message status: {value}"))),
-        };
+        let status = MessageStatus::try_from(record.status.as_str()).map_err(AppError::Other)?;
 
         Ok(Self {
             id: record.id,

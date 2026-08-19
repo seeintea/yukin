@@ -5,6 +5,7 @@ import { useId, useRef } from "react";
 import { modelProviderCreate } from "#/api/model-provider";
 import { ModelProviderForm } from "#/components/model-provider-form";
 import type { ModelProviderFormRef } from "#/components/model-provider-form";
+import { modelProviderKeys, upsertModelProvider } from "#/features/model-provider/queries";
 import type { CreateRequest, ModelProvider } from "#/protocol/model-provider";
 import { Button } from "#/shadcn/button";
 import {
@@ -16,21 +17,7 @@ import {
   CardTitle,
 } from "#/shadcn/card";
 import { toast } from "#/shadcn/toast";
-
-const modelProviderListQueryKey = ["model-provider", "list"] as const;
-
-function getErrorMessage(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-
-  return "请检查配置后重试";
-}
+import { showErrorToast } from "#/utils/toast";
 
 export function Initialize() {
   const formId = useId();
@@ -41,10 +28,9 @@ export function Initialize() {
   const createMutation = useMutation({
     mutationFn: modelProviderCreate,
     onSuccess: async (provider) => {
-      queryClient.setQueryData<ModelProvider[]>(modelProviderListQueryKey, (providers = []) => [
-        provider,
-        ...providers.filter((item) => item.id !== provider.id),
-      ]);
+      queryClient.setQueryData<ModelProvider[]>(modelProviderKeys.list, (providers = []) =>
+        upsertModelProvider(providers, provider),
+      );
       toast.add({
         title: "模型供应商创建成功",
         type: "success",
@@ -52,12 +38,7 @@ export function Initialize() {
       await navigate({ to: "/chat" });
     },
     onError: (error) => {
-      toast.add({
-        title: "模型供应商创建失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("模型供应商创建失败", error, "请检查配置后重试");
     },
   });
 

@@ -7,9 +7,11 @@ import {
   conversationKeys,
   conversationListQueryOptions,
   currentConversationQueryOptions,
+  upsertConversation,
 } from "#/features/chat/queries";
 import type { Conversation } from "#/protocol/conversation";
 import { toast } from "#/shadcn/toast";
+import { showErrorToast } from "#/utils/toast";
 
 interface ChatSearch {
   conversationId?: string;
@@ -37,29 +39,22 @@ function ChatRoute() {
   const createMutation = useMutation({
     mutationFn: conversationCreate,
     onSuccess: async (conversation) => {
-      queryClient.setQueryData<Conversation[]>(conversationKeys.list, (conversations = []) => [
-        conversation,
-        ...conversations.filter((item) => item.id !== conversation.id),
-      ]);
+      queryClient.setQueryData<Conversation[]>(conversationKeys.list, (conversations = []) =>
+        upsertConversation(conversations, conversation),
+      );
       queryClient.setQueryData(conversationKeys.current, conversation);
       await navigate({ search: { conversationId: conversation.id } });
     },
-    onError: () => {
-      toast.add({
-        title: "新建对话失败",
-        description: "请稍后重试",
-        type: "error",
-        priority: "high",
-      });
+    onError: (error) => {
+      showErrorToast("新建对话失败", error);
     },
   });
   const renameMutation = useMutation({
     mutationFn: conversationRename,
     onSuccess: (conversation) => {
-      queryClient.setQueryData<Conversation[]>(conversationKeys.list, (conversations = []) => [
-        conversation,
-        ...conversations.filter((item) => item.id !== conversation.id),
-      ]);
+      queryClient.setQueryData<Conversation[]>(conversationKeys.list, (conversations = []) =>
+        upsertConversation(conversations, conversation),
+      );
       queryClient.setQueryData<Conversation | undefined>(conversationKeys.current, (current) =>
         current?.id === conversation.id ? conversation : current,
       );
@@ -69,12 +64,7 @@ function ChatRoute() {
       toast.add({ title: "会话已重命名", type: "success" });
     },
     onError: (error) => {
-      toast.add({
-        title: "会话重命名失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("会话重命名失败", error);
     },
   });
 
@@ -110,12 +100,7 @@ function ChatRoute() {
       toast.add({ title: "会话已删除", type: "success" });
     },
     onError: (error) => {
-      toast.add({
-        title: "会话删除失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("会话删除失败", error);
     },
   });
 
@@ -148,17 +133,4 @@ function ChatRoute() {
       }
     />
   );
-}
-
-function getErrorMessage(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-
-  return "请稍后重试";
 }

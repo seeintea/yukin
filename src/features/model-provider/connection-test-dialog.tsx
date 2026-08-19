@@ -23,25 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "#/shadcn/select";
-import { toast } from "#/shadcn/toast";
+import { getErrorMessage } from "#/utils/error";
+import { showErrorToast } from "#/utils/toast";
 
 interface ConnectionTestDialogProps {
   provider: ModelProvider;
   preset: ModelProviderPreset | undefined;
   onClose: () => void;
-}
-
-function getErrorMessage(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-
-  return "连接测试失败，请检查配置后重试";
 }
 
 export function ConnectionTestDialog({ provider, preset, onClose }: ConnectionTestDialogProps) {
@@ -52,12 +40,7 @@ export function ConnectionTestDialog({ provider, preset, onClose }: ConnectionTe
   const testMutation = useMutation({
     mutationFn: modelProviderTestConnection,
     onError: (error) => {
-      toast.add({
-        title: "连接测试失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("连接测试失败", error, "连接测试失败，请检查配置后重试");
     },
   });
   const modelItems = models.map((model) => ({
@@ -128,7 +111,7 @@ export function ConnectionTestDialog({ provider, preset, onClose }: ConnectionTe
 
         {testMutation.isError && (
           <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {getErrorMessage(testMutation.error)}
+            {getErrorMessage(testMutation.error, "连接测试失败，请检查配置后重试")}
           </p>
         )}
 

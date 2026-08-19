@@ -239,10 +239,7 @@ async fn execute_stream(
 
         let stream_result = tokio::select! {
             changed = cancellation.changed() => {
-                if changed.is_ok() && *cancellation.borrow() {
-                    return StreamOutcome::Cancelled { content };
-                }
-                return failed(content, AppError::Other("run cancellation channel closed".into()));
+                return cancellation_outcome(changed, cancellation, content);
             }
             result = agent::stream_completion(
                 client,
@@ -270,10 +267,7 @@ async fn execute_stream(
         loop {
             let event = tokio::select! {
                 changed = cancellation.changed() => {
-                    if changed.is_ok() && *cancellation.borrow() {
-                        return StreamOutcome::Cancelled { content };
-                    }
-                    return failed(content, AppError::Other("run cancellation channel closed".into()));
+                    return cancellation_outcome(changed, cancellation, content);
                 }
                 event = stream.next() => event,
             };
@@ -479,10 +473,7 @@ async fn execute_stream(
 
                 let decision = tokio::select! {
                     changed = cancellation.changed() => {
-                        if changed.is_ok() && *cancellation.borrow() {
-                            return StreamOutcome::Cancelled { content };
-                        }
-                        return failed(content, AppError::Other("run cancellation channel closed".into()));
+                        return cancellation_outcome(changed, cancellation, content);
                     }
                     result = timeout(APPROVAL_TIMEOUT, approval) => result,
                 };
@@ -540,10 +531,7 @@ async fn execute_stream(
 
             let execution = tokio::select! {
                 changed = cancellation.changed() => {
-                    if changed.is_ok() && *cancellation.borrow() {
-                        return StreamOutcome::Cancelled { content };
-                    }
-                    return failed(content, AppError::Other("run cancellation channel closed".into()));
+                    return cancellation_outcome(changed, cancellation, content);
                 }
                 result = timeout(
                     TOOL_TIMEOUT,
@@ -674,6 +662,21 @@ fn failed(content: impl Into<String>, error: AppError) -> StreamOutcome {
     StreamOutcome::Failed {
         content: content.into(),
         error,
+    }
+}
+
+fn cancellation_outcome(
+    changed: Result<(), watch::error::RecvError>,
+    cancellation: &watch::Receiver<bool>,
+    content: String,
+) -> StreamOutcome {
+    if changed.is_ok() && *cancellation.borrow() {
+        StreamOutcome::Cancelled { content }
+    } else {
+        failed(
+            content,
+            AppError::Other("run cancellation channel closed".into()),
+        )
     }
 }
 

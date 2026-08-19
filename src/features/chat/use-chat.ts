@@ -11,7 +11,7 @@ import type {
   ToolCallDecision,
 } from "#/protocol/agent-run";
 import type { ConversationMessage, ConversationSnapshot } from "#/protocol/conversation";
-import { toast } from "#/shadcn/toast";
+import { showErrorToast } from "#/utils/toast";
 
 import { agentRunKeys, conversationKeys, conversationQueryOptions } from "./queries";
 
@@ -169,21 +169,25 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
   };
 }
 
-function getErrorMessage(error: unknown) {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-
-  return "请稍后重试";
-}
-
 function isActiveStatus(status: ActiveStatus | undefined) {
   return status === "pending" || status === "running" || status === "waiting_approval";
+}
+
+function updateAssistantRunMessage(
+  snapshot: ConversationSnapshot | undefined,
+  runId: string,
+  update: (message: ConversationMessage) => ConversationMessage,
+) {
+  if (!snapshot) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    messages: snapshot.messages.map((message) =>
+      message.runId === runId && message.role === "assistant" ? update(message) : message,
+    ),
+  };
 }
 
 function appendRunMessages(
@@ -285,16 +289,7 @@ export function useChat(conversationId: string) {
           ? "cancelled"
           : "failed";
     queryClient.setQueryData<ConversationSnapshot>(queryKey, (snapshot) =>
-      snapshot
-        ? {
-            ...snapshot,
-            messages: snapshot.messages.map((message) =>
-              message.runId === event.runId && message.role === "assistant"
-                ? { ...message, status }
-                : message,
-            ),
-          }
-        : snapshot,
+      updateAssistantRunMessage(snapshot, event.runId, (message) => ({ ...message, status })),
     );
     void Promise.all([
       queryClient.invalidateQueries({ queryKey }),
@@ -327,16 +322,10 @@ export function useChat(conversationId: string) {
           );
         } else if (event.event === "output_text_delta") {
           queryClient.setQueryData<ConversationSnapshot>(queryKey, (snapshot) =>
-            snapshot
-              ? {
-                  ...snapshot,
-                  messages: snapshot.messages.map((message) =>
-                    message.runId === event.runId && message.role === "assistant"
-                      ? { ...message, content: message.content + event.data.content }
-                      : message,
-                  ),
-                }
-              : snapshot,
+            updateAssistantRunMessage(snapshot, event.runId, (message) => ({
+              ...message,
+              content: message.content + event.data.content,
+            })),
           );
         } else if (
           event.event === "run_completed" ||
@@ -345,12 +334,7 @@ export function useChat(conversationId: string) {
         ) {
           finishRun(event);
           if (event.event === "run_failed") {
-            toast.add({
-              title: "消息发送失败",
-              description: event.data.errorMessage,
-              type: "error",
-              priority: "high",
-            });
+            showErrorToast("消息发送失败", event.data.errorMessage);
           }
         }
       };
@@ -373,12 +357,7 @@ export function useChat(conversationId: string) {
       return response;
     },
     onError: (error) => {
-      toast.add({
-        title: "消息发送失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("消息发送失败", error);
     },
   });
   const cancelMutation = useMutation({
@@ -388,12 +367,7 @@ export function useChat(conversationId: string) {
       }
     },
     onError: (error) => {
-      toast.add({
-        title: "停止生成失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("停止生成失败", error);
     },
   });
   const approvalMutation = useMutation({
@@ -416,12 +390,7 @@ export function useChat(conversationId: string) {
       void queryClient.invalidateQueries({ queryKey: agentRunKeys.snapshot(toolCall.runId) });
     },
     onError: (error) => {
-      toast.add({
-        title: "工具审批失败",
-        description: getErrorMessage(error),
-        type: "error",
-        priority: "high",
-      });
+      showErrorToast("工具审批失败", error);
     },
   });
   const snapshotStatus = snapshotQuery.data?.run.status;

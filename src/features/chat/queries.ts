@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 
 import { conversationCurrent, conversationFind, conversationList } from "#/api/conversation";
+import type { Conversation } from "#/protocol/conversation";
 
 export const conversationKeys = {
   current: ["conversation", "current"] as const,
@@ -30,4 +31,8 @@ export function conversationQueryOptions(conversationId: string) {
     queryFn: () => conversationFind({ id: conversationId }),
     staleTime: Infinity,
   });
+}
+
+export function upsertConversation(conversations: Conversation[], conversation: Conversation) {
+  return [conversation, ...conversations.filter((item) => item.id !== conversation.id)];
 }

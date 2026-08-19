@@ -22,7 +22,7 @@ pub struct Message {
     pub metadata: RecordMetadata,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     User,
@@ -30,13 +30,40 @@ pub enum MessageRole {
     Tool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+impl TryFrom<&str> for MessageRole {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "user" => Ok(Self::User),
+            "assistant" => Ok(Self::Assistant),
+            "tool" => Ok(Self::Tool),
+            value => Err(format!("invalid message role: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageStatus {
     Streaming,
     Completed,
     Failed,
     Cancelled,
+}
+
+impl TryFrom<&str> for MessageStatus {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "streaming" => Ok(Self::Streaming),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            value => Err(format!("invalid message status: {value}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,7 +94,7 @@ pub struct DeleteRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::RenameRequest;
+    use super::{MessageRole, MessageStatus, RenameRequest};
 
     #[test]
     fn deserializes_conversation_rename_request() {
@@ -79,5 +106,19 @@ mod tests {
 
         assert_eq!(request.id, "conversation-1");
         assert_eq!(request.title, "新的标题");
+    }
+
+    #[test]
+    fn parses_stored_message_enums() {
+        assert_eq!(
+            MessageRole::try_from("assistant"),
+            Ok(MessageRole::Assistant)
+        );
+        assert_eq!(
+            MessageStatus::try_from("cancelled"),
+            Ok(MessageStatus::Cancelled)
+        );
+        assert!(MessageRole::try_from("unknown").is_err());
+        assert!(MessageStatus::try_from("unknown").is_err());
     }
 }

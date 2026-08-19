@@ -61,6 +61,22 @@ pub enum RunStatus {
     Cancelled,
 }
 
+impl TryFrom<&str> for RunStatus {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "running" => Ok(Self::Running),
+            "waiting_approval" => Ok(Self::WaitingApproval),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            value => Err(format!("invalid run status: {value}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
@@ -222,7 +238,9 @@ pub enum EventKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{Event, EventKind, Phase, StartRequest, ToolCallDecideRequest, ToolCallDecision};
+    use super::{
+        Event, EventKind, Phase, RunStatus, StartRequest, ToolCallDecideRequest, ToolCallDecision,
+    };
 
     #[test]
     fn deserializes_start_request() {
@@ -278,5 +296,15 @@ mod tests {
         assert_eq!(request.tool_call_id, "tool-1");
         assert_eq!(request.arguments_digest, "abc123");
         assert_eq!(request.decision, ToolCallDecision::Allow);
+    }
+
+    #[test]
+    fn parses_stored_run_status() {
+        assert_eq!(RunStatus::try_from("running"), Ok(RunStatus::Running));
+        assert_eq!(
+            RunStatus::try_from("waiting_approval"),
+            Ok(RunStatus::WaitingApproval)
+        );
+        assert!(RunStatus::try_from("unknown").is_err());
     }
 }

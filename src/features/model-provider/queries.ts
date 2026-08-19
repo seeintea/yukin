@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 
 import { modelProviderList, modelProviderPresetList } from "#/api/model-provider";
+import type { ModelProvider } from "#/protocol/model-provider";
 
 export const modelProviderKeys = {
   all: ["model-provider"] as const,
@@ -19,3 +20,7 @@ export const modelProviderPresetListQueryOptions = queryOptions({
   queryFn: modelProviderPresetList,
   staleTime: Infinity,
 });
+
+export function upsertModelProvider(providers: ModelProvider[], provider: ModelProvider) {
+  return [provider, ...providers.filter((item) => item.id !== provider.id)];
+}

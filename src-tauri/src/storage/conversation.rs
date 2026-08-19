@@ -46,19 +46,8 @@ impl TryFrom<MessageRecord> for Message {
     type Error = AppError;
 
     fn try_from(record: MessageRecord) -> Result<Self, Self::Error> {
-        let role = match record.role.as_str() {
-            "user" => MessageRole::User,
-            "assistant" => MessageRole::Assistant,
-            "tool" => MessageRole::Tool,
-            value => return Err(AppError::Other(format!("invalid message role: {value}"))),
-        };
-        let status = match record.status.as_str() {
-            "streaming" => MessageStatus::Streaming,
-            "completed" => MessageStatus::Completed,
-            "failed" => MessageStatus::Failed,
-            "cancelled" => MessageStatus::Cancelled,
-            value => return Err(AppError::Other(format!("invalid message status: {value}"))),
-        };
+        let role = MessageRole::try_from(record.role.as_str()).map_err(AppError::Other)?;
+        let status = MessageStatus::try_from(record.status.as_str()).map_err(AppError::Other)?;
 
         Ok(Self {
             id: record.id,
