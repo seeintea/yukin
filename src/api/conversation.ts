@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Conversation, ConversationSnapshot, FindRequest } from "#/protocol/conversation";
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationSnapshot,
+  FindRequest,
+} from "#/protocol/conversation";
 
 export function conversationCurrent(): Promise<Conversation> {
   return invoke("conversation_current");
@@ -16,4 +21,8 @@ export function conversationList(): Promise<Conversation[]> {
 
 export function conversationCreate(): Promise<Conversation> {
   return invoke("conversation_create");
+}
+
+export function conversationMessageList(request: FindRequest): Promise<ConversationMessage[]> {
+  return invoke("conversation_message_list", { request });
 }

@@ -40,7 +40,17 @@ export function Chat({
 }
 
 function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">) {
-  const { messages, sendMessage, isPending, isSending, isError } = useChat(conversationId);
+  const {
+    messages,
+    sendMessage,
+    cancelRun,
+    canCancel,
+    phase,
+    isPending,
+    isSending,
+    isCancelling,
+    isError,
+  } = useChat(conversationId);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,9 +78,15 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
                       isStreaming={isSending && index === messages.length - 1}
                     />
                   ) : message.status === "streaming" ? (
-                    "正在生成…"
+                    phase === "thinking" ? (
+                      "正在思考…"
+                    ) : (
+                      "正在生成…"
+                    )
                   ) : message.status === "failed" ? (
                     <span className="text-muted-foreground">生成失败</span>
+                  ) : message.status === "cancelled" ? (
+                    <span className="text-muted-foreground">已停止生成</span>
                   ) : null}
                 </div>
               ),
@@ -81,7 +97,11 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
       </div>
       <div className="shrink-0 px-6 pt-4 pb-6">
         <div className="mx-auto w-full max-w-3xl">
-          <ChatInput isPending={isPending || isError} onSubmit={sendMessage} />
+          <ChatInput
+            isPending={isPending || isError}
+            onSubmit={sendMessage}
+            onCancel={isSending && canCancel && !isCancelling ? cancelRun : undefined}
+          />
         </div>
       </div>
     </div>

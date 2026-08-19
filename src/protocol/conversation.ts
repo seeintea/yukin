@@ -1,5 +1,5 @@
-export type MessageRole = "user" | "assistant";
-export type MessageStatus = "streaming" | "completed" | "failed";
+export type MessageRole = "user" | "assistant" | "tool";
+export type MessageStatus = "streaming" | "completed" | "failed" | "cancelled";
 
 export interface Conversation {
   id: string;
@@ -10,6 +10,7 @@ export interface Conversation {
 
 export interface ConversationMessage {
   id: string;
+  runId: string | null;
   role: MessageRole;
   content: string;
   status: MessageStatus;

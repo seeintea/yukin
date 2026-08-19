@@ -20,6 +20,7 @@ struct ConversationRecord {
 #[derive(FromRow)]
 struct MessageRecord {
     id: String,
+    run_id: Option<String>,
     role: String,
     content: String,
     status: String,
@@ -48,17 +49,20 @@ impl TryFrom<MessageRecord> for Message {
         let role = match record.role.as_str() {
             "user" => MessageRole::User,
             "assistant" => MessageRole::Assistant,
+            "tool" => MessageRole::Tool,
             value => return Err(AppError::Other(format!("invalid message role: {value}"))),
         };
         let status = match record.status.as_str() {
             "streaming" => MessageStatus::Streaming,
             "completed" => MessageStatus::Completed,
             "failed" => MessageStatus::Failed,
+            "cancelled" => MessageStatus::Cancelled,
             value => return Err(AppError::Other(format!("invalid message status: {value}"))),
         };
 
         Ok(Self {
             id: record.id,
+            run_id: record.run_id,
             role,
             content: record.content,
             status,
@@ -139,10 +143,10 @@ pub async fn create(pool: &SqlitePool) -> AppResult<Conversation> {
     Ok(record.into())
 }
 
-async fn list_messages(pool: &SqlitePool, conversation_id: &str) -> AppResult<Vec<Message>> {
+pub async fn list_messages(pool: &SqlitePool, conversation_id: &str) -> AppResult<Vec<Message>> {
     let records = sqlx::query_as::<_, MessageRecord>(
         r#"
-        SELECT id, role, content, status, sequence, created_at, updated_at
+        SELECT id, run_id, role, content, status, sequence, created_at, updated_at
         FROM messages
         WHERE conversation_id = ?
         ORDER BY sequence

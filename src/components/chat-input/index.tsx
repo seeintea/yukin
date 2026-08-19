@@ -1,4 +1,4 @@
-import { ArrowUpIcon, LoaderCircleIcon } from "lucide-react";
+import { ArrowUpIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { useState } from "react";
 
@@ -15,9 +15,10 @@ export interface ChatInputValue {
 interface ChatInputProps {
   isPending: boolean;
   onSubmit: (value: ChatInputValue) => void;
+  onCancel?: () => void;
 }
 
-export function ChatInput({ isPending, onSubmit }: ChatInputProps) {
+export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
   const [content, setContent] = useState("");
   const [selection, setSelection] = useState<ModelSelection | null>(null);
 
@@ -58,12 +59,21 @@ export function ChatInput({ isPending, onSubmit }: ChatInputProps) {
       <div className="flex items-end justify-between gap-2 pt-2">
         <ModelSelector value={selection} onValueChange={setSelection} disabled={isPending} />
         <Button
-          type="submit"
+          type={isPending && onCancel ? "button" : "submit"}
           size="icon"
-          aria-label="发送消息"
-          disabled={!content.trim() || !selection || isPending}
+          aria-label={isPending && onCancel ? "停止生成" : "发送消息"}
+          disabled={isPending ? !onCancel : !content.trim() || !selection}
+          onClick={isPending ? onCancel : undefined}
         >
-          {isPending ? <LoaderCircleIcon className="animate-spin" /> : <ArrowUpIcon />}
+          {isPending ? (
+            onCancel ? (
+              <SquareIcon className="fill-current" />
+            ) : (
+              <LoaderCircleIcon className="animate-spin" />
+            )
+          ) : (
+            <ArrowUpIcon />
+          )}
         </Button>
       </div>
     </form>

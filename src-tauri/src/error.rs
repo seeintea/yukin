@@ -14,8 +14,25 @@ pub enum AppError {
     Tauri(#[from] tauri::Error),
     #[error("keyring: {0}")]
     Keyring(#[from] keyring::Error),
+    #[error("run state: {0}")]
+    RunState(String),
     #[error("{0}")]
     Other(String),
+}
+
+impl AppError {
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Model(error) => error.code(),
+            Self::Io(_) => "io",
+            Self::Db(_) => "db",
+            Self::Migrate(_) => "migrate",
+            Self::Tauri(_) => "tauri",
+            Self::Keyring(_) => "keyring",
+            Self::RunState(_) => "run_state",
+            Self::Other(_) => "other",
+        }
+    }
 }
 
 impl serde::Serialize for AppError {
@@ -24,17 +41,8 @@ impl serde::Serialize for AppError {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let code = match self {
-            AppError::Model(error) => error.code(),
-            AppError::Io(_) => "io",
-            AppError::Db(_) => "db",
-            AppError::Migrate(_) => "migrate",
-            AppError::Tauri(_) => "tauri",
-            AppError::Keyring(_) => "keyring",
-            AppError::Other(_) => "other",
-        };
         let mut s = serializer.serialize_struct("AppError", 2)?;
-        s.serialize_field("code", code)?;
+        s.serialize_field("code", self.code())?;
         s.serialize_field("message", &self.to_string())?;
         s.end()
     }
@@ -61,5 +69,15 @@ mod tests {
             value["message"],
             "model: model request was rate limited: slow down"
         );
+    }
+
+    #[test]
+    fn serializes_run_state_error_code() {
+        let error = AppError::RunState("run is not active".into());
+
+        let value = serde_json::to_value(error).expect("serializable run state error");
+
+        assert_eq!(value["code"], "run_state");
+        assert_eq!(value["message"], "run state: run is not active");
     }
 }

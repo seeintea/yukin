@@ -8,6 +8,10 @@ export const conversationKeys = {
   find: (conversationId: string) => ["conversation", "find", conversationId] as const,
 };
 
+export const agentRunKeys = {
+  snapshot: (runId: string) => ["agent-run", "snapshot", runId] as const,
+};
+
 export const currentConversationQueryOptions = queryOptions({
   queryKey: conversationKeys.current,
   queryFn: conversationCurrent,

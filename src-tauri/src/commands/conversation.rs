@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{
-    protocol::conversation::{Conversation, FindRequest, Snapshot},
+    protocol::conversation::{Conversation, FindRequest, Message, Snapshot},
     storage::conversation,
     AppResult, AppState,
 };
@@ -27,4 +27,12 @@ pub async fn conversation_list(state: State<'_, AppState>) -> AppResult<Vec<Conv
 #[tauri::command]
 pub async fn conversation_create(state: State<'_, AppState>) -> AppResult<Conversation> {
     conversation::create(state.db()).await
+}
+
+#[tauri::command]
+pub async fn conversation_message_list(
+    state: State<'_, AppState>,
+    request: FindRequest,
+) -> AppResult<Vec<Message>> {
+    conversation::list_messages(state.db(), &request.id).await
 }

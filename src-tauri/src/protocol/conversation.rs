@@ -14,6 +14,7 @@ pub struct Conversation {
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub id: String,
+    pub run_id: Option<String>,
     pub role: MessageRole,
     pub content: String,
     pub status: MessageStatus,
@@ -26,6 +27,7 @@ pub struct Message {
 pub enum MessageRole {
     User,
     Assistant,
+    Tool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -34,6 +36,7 @@ pub enum MessageStatus {
     Streaming,
     Completed,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize)]
