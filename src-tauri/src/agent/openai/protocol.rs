@@ -259,6 +259,7 @@ mod tests {
         let request = ChatCompletionRequest::streaming(CompletionRequest::new(
             "deepseek-v4-flash".into(),
             vec![
+                Message::text(Role::System, "遵循选中的 Skill".into()),
                 Message::text(Role::User, "我叫 Yukin".into()),
                 Message::text(Role::Assistant, "记住了".into()),
                 Message::text(Role::User, "我叫什么？".into()),
@@ -270,6 +271,7 @@ mod tests {
         assert_eq!(
             value["messages"],
             serde_json::json!([
+                { "role": "system", "content": "遵循选中的 Skill" },
                 { "role": "user", "content": "我叫 Yukin" },
                 { "role": "assistant", "content": "记住了" },
                 { "role": "user", "content": "我叫什么？" }

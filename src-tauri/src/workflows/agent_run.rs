@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::{
     agent::{
         self,
+        skills::SkillRegistry,
         tools::{arguments_digest, ApprovalPolicy, ExecutionAuthorization, ToolRegistry},
         CompletionRequest, Message, ModelError, Role, RuntimeError, ThinkingMode, TokenUsage,
         ToolCall, ToolCallFunction, ToolCallType,
@@ -41,12 +42,15 @@ pub(crate) struct PreparedRun {
     model_id: String,
     reasoning_effort: Option<ReasoningEffort>,
     messages: Vec<Message>,
+    allowed_tools: HashSet<String>,
 }
 
 pub(crate) async fn prepare(pool: &SqlitePool, request: StartRequest) -> AppResult<PreparedRun> {
     let run_id = Uuid::now_v7().to_string();
     let user_message_id = Uuid::now_v7().to_string();
     let assistant_message_id = Uuid::now_v7().to_string();
+    let available_tools = ToolRegistry::built_in(PathBuf::new()).names();
+    let resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
     let history = model_response::start(
         pool,
         model_response::StartParams {
@@ -60,20 +64,24 @@ pub(crate) async fn prepare(pool: &SqlitePool, request: StartRequest) -> AppResu
                 .reasoning_effort
                 .map(|effort| effort.as_str().into()),
             content: request.content.clone(),
+            skills: resolved_skills.selected,
         },
     )
     .await?;
-    let mut messages = history
-        .into_iter()
-        .map(|message| {
-            let role = match message.role.as_str() {
-                "user" => Role::User,
-                "assistant" => Role::Assistant,
-                value => return Err(AppError::Other(format!("invalid message role: {value}"))),
-            };
-            Ok(Message::text(role, message.content))
-        })
-        .collect::<AppResult<Vec<_>>>()?;
+    let mut messages = vec![Message::text(Role::System, resolved_skills.instructions)];
+    messages.extend(
+        history
+            .into_iter()
+            .map(|message| {
+                let role = match message.role.as_str() {
+                    "user" => Role::User,
+                    "assistant" => Role::Assistant,
+                    value => return Err(AppError::Other(format!("invalid message role: {value}"))),
+                };
+                Ok(Message::text(role, message.content))
+            })
+            .collect::<AppResult<Vec<_>>>()?,
+    );
     messages.push(Message::text(Role::User, request.content));
 
     Ok(PreparedRun {
@@ -87,6 +95,7 @@ pub(crate) async fn prepare(pool: &SqlitePool, request: StartRequest) -> AppResu
         model_id: request.model_id,
         reasoning_effort: request.reasoning_effort,
         messages,
+        allowed_tools: resolved_skills.allowed_tools,
     })
 }
 
@@ -202,7 +211,7 @@ async fn execute_stream(
 
     for step in 0..MAX_MODEL_STEPS {
         let mut request = CompletionRequest::new(prepared.model_id.clone(), messages.clone());
-        request.tools = registry.definitions();
+        request.tools = registry.definitions_for(&prepared.allowed_tools);
         if let Some(reasoning_effort) = prepared.reasoning_effort {
             request.thinking = Some(ThinkingMode::Enabled);
             request.reasoning_effort = Some(reasoning_effort.into());
@@ -340,6 +349,12 @@ async fn execute_stream(
         ));
 
         for tool_call in tool_calls {
+            if !prepared.allowed_tools.contains(&tool_call.function.name) {
+                return failed(
+                    content,
+                    RuntimeError::ToolNotAllowed(tool_call.function.name).into(),
+                );
+            }
             let arguments =
                 match serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
                     Ok(arguments) => arguments,

@@ -1,4 +1,5 @@
 mod openai;
+pub(crate) mod skills;
 mod sse;
 pub(crate) mod tools;
 
@@ -56,6 +57,12 @@ pub enum RuntimeError {
     StepLimit,
     #[error("agent reached the maximum tool calls")]
     ToolCallLimit,
+    #[error("skill is not registered: {0}")]
+    SkillNotFound(String),
+    #[error("skill {skill} requires unavailable tool: {tool}")]
+    SkillToolUnavailable { skill: String, tool: String },
+    #[error("tool is not allowed for this run: {0}")]
+    ToolNotAllowed(String),
     #[error("tool is not registered: {0}")]
     ToolNotFound(String),
     #[error("invalid arguments for tool {name}: {message}")]
@@ -79,6 +86,9 @@ impl RuntimeError {
         match self {
             Self::StepLimit => "agent_step_limit",
             Self::ToolCallLimit => "agent_tool_call_limit",
+            Self::SkillNotFound(_) => "skill_not_found",
+            Self::SkillToolUnavailable { .. } => "skill_tool_unavailable",
+            Self::ToolNotAllowed(_) => "tool_not_allowed",
             Self::ToolNotFound(_) => "tool_not_found",
             Self::InvalidToolArguments { .. } => "tool_invalid_arguments",
             Self::ToolTimeout(_) => "tool_timeout",
@@ -142,6 +152,7 @@ impl Message {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
+    System,
     User,
     Assistant,
     Tool,

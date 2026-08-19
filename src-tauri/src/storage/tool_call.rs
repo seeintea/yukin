@@ -369,6 +369,7 @@ mod tests {
                 model_id: "model-1".into(),
                 reasoning_effort: None,
                 content: "save a note".into(),
+                skills: Vec::new(),
             },
         )
         .await

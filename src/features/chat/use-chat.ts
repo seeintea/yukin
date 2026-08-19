@@ -304,7 +304,7 @@ export function useChat(conversationId: string) {
   };
 
   const sendMutation = useMutation({
-    mutationFn: async ({ content, selection }: ChatInputValue) => {
+    mutationFn: async ({ content, selection, skillId }: ChatInputValue) => {
       const handleEvent = (event: AgentRunEvent) => {
         const lastSequence = eventSequences.current.get(event.runId) ?? 0;
         if (event.sequence <= lastSequence) {
@@ -362,6 +362,7 @@ export function useChat(conversationId: string) {
           modelId: selection.modelId,
           reasoningEffort: selection.reasoningEffort,
           content,
+          skillIds: skillId ? [skillId] : [],
         },
         handleEvent,
       );

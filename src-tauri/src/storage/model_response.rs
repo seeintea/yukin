@@ -3,7 +3,7 @@ use sqlx::{FromRow, SqlitePool};
 use crate::{
     agent::TokenUsage,
     protocol::{
-        agent_run::{Run, RunStatus, Snapshot},
+        agent_run::{Run, RunSkill, RunStatus, Snapshot},
         common::RecordMetadata,
         conversation::{Message, MessageRole, MessageStatus},
     },
@@ -20,6 +20,7 @@ pub(crate) struct StartParams {
     pub model_id: String,
     pub reasoning_effort: Option<String>,
     pub content: String,
+    pub skills: Vec<RunSkill>,
 }
 
 pub(crate) struct HistoryMessage {
@@ -62,6 +63,12 @@ struct AssistantMessageRecord {
     updated_at: String,
 }
 
+#[derive(FromRow)]
+struct RunSkillRecord {
+    skill_id: String,
+    skill_version: String,
+}
+
 impl TryFrom<RunRecord> for Run {
     type Error = AppError;
 
@@ -95,6 +102,7 @@ impl TryFrom<RunRecord> for Run {
             created_at: record.created_at,
             started_at: record.started_at,
             completed_at: record.completed_at,
+            skills: Vec::new(),
         })
     }
 }
@@ -163,6 +171,14 @@ pub(crate) async fn start(
     .bind(&params.reasoning_effort)
     .execute(&mut *transaction)
     .await?;
+    for skill in &params.skills {
+        sqlx::query("INSERT INTO run_skills (run_id, skill_id, skill_version) VALUES (?, ?, ?)")
+            .bind(&params.run_id)
+            .bind(&skill.id)
+            .bind(&skill.version)
+            .execute(&mut *transaction)
+            .await?;
+    }
     sqlx::query(
         r#"
         INSERT INTO messages (
@@ -410,7 +426,7 @@ pub(crate) async fn cancel(
 }
 
 pub(crate) async fn snapshot(pool: &SqlitePool, run_id: &str) -> AppResult<Snapshot> {
-    let run = sqlx::query_as::<_, RunRecord>(
+    let mut run: Run = sqlx::query_as::<_, RunRecord>(
         r#"
         SELECT id, conversation_id, provider_id, model_id, reasoning_effort, status,
                error_code, error_message, prompt_tokens, completion_tokens, total_tokens,
@@ -423,6 +439,23 @@ pub(crate) async fn snapshot(pool: &SqlitePool, run_id: &str) -> AppResult<Snaps
     .fetch_one(pool)
     .await?
     .try_into()?;
+    run.skills = sqlx::query_as::<_, RunSkillRecord>(
+        r#"
+        SELECT skill_id, skill_version
+        FROM run_skills
+        WHERE run_id = ?
+        ORDER BY skill_id
+        "#,
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|record| RunSkill {
+        id: record.skill_id,
+        version: record.skill_version,
+    })
+    .collect();
     let assistant_message = sqlx::query_as::<_, AssistantMessageRecord>(
         r#"
         SELECT id, run_id, content, status, sequence, created_at, updated_at
@@ -509,7 +542,7 @@ mod tests {
 
     use super::{
         cancel, complete, mark_started, recover_interrupted, snapshot, start, update_partial,
-        StartParams,
+        RunSkill, StartParams,
     };
 
     async fn setup() -> SqlitePool {
@@ -551,6 +584,7 @@ mod tests {
             model_id: "model-1".into(),
             reasoning_effort: None,
             content: "第一个问题".into(),
+            skills: Vec::new(),
         }
     }
 
@@ -591,6 +625,23 @@ mod tests {
             mark_started(&pool, "run-1").await,
             Err(AppError::RunState(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn persists_selected_skill_version() {
+        let pool = setup().await;
+        let mut params = start_params("run-skill");
+        params.skills = vec![RunSkill {
+            id: "time_assistant".into(),
+            version: "1".into(),
+        }];
+
+        start(&pool, params).await.expect("start run with skill");
+
+        let snapshot = snapshot(&pool, "run-skill").await.expect("snapshot");
+        assert_eq!(snapshot.run.skills.len(), 1);
+        assert_eq!(snapshot.run.skills[0].id, "time_assistant");
+        assert_eq!(snapshot.run.skills[0].version, "1");
     }
 
     #[tokio::test]

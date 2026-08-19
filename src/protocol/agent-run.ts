@@ -7,6 +7,7 @@ export interface AgentRunStartRequest {
   modelId: string;
   reasoningEffort: ReasoningEffort | null;
   content: string;
+  skillIds: string[];
 }
 
 export interface AgentRunStartResponse {
@@ -38,6 +39,12 @@ export interface AgentRun {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  skills: AgentRunSkill[];
+}
+
+export interface AgentRunSkill {
+  id: string;
+  version: string;
 }
 
 export interface AgentRunSnapshot {

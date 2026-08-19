@@ -4,12 +4,14 @@ import { useState } from "react";
 
 import { ModelSelector } from "#/components/model-selector";
 import type { ModelSelection } from "#/components/model-selector";
+import { SkillSelector } from "#/components/skill-selector";
 import { Button } from "#/shadcn/button";
 import { Textarea } from "#/shadcn/textarea";
 
 export interface ChatInputValue {
   content: string;
   selection: ModelSelection;
+  skillId: string | null;
 }
 
 interface ChatInputProps {
@@ -21,6 +23,7 @@ interface ChatInputProps {
 export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
   const [content, setContent] = useState("");
   const [selection, setSelection] = useState<ModelSelection | null>(null);
+  const [skillId, setSkillId] = useState<string | null>(null);
 
   const submit = () => {
     const normalizedContent = content.trim();
@@ -28,7 +31,7 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
       return;
     }
 
-    onSubmit({ content: normalizedContent, selection });
+    onSubmit({ content: normalizedContent, selection, skillId });
     setContent("");
   };
 
@@ -57,7 +60,10 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
         className="max-h-48 min-h-24 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
       <div className="flex items-end justify-between gap-2 pt-2">
-        <ModelSelector value={selection} onValueChange={setSelection} disabled={isPending} />
+        <div className="flex flex-wrap items-center gap-1">
+          <ModelSelector value={selection} onValueChange={setSelection} disabled={isPending} />
+          <SkillSelector value={skillId} onValueChange={setSkillId} disabled={isPending} />
+        </div>
         <Button
           type={isPending && onCancel ? "button" : "submit"}
           size="icon"

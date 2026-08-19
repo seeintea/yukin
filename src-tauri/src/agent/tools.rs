@@ -1,4 +1,7 @@
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Component, Path, PathBuf},
+};
 
 use chrono::{FixedOffset, SecondsFormat, Utc};
 use serde::Deserialize;
@@ -106,6 +109,20 @@ impl ToolRegistry {
                 }),
             },
         ]
+    }
+
+    pub(crate) fn names(&self) -> HashSet<String> {
+        self.definitions()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect()
+    }
+
+    pub(crate) fn definitions_for(&self, allowed: &HashSet<String>) -> Vec<ToolDefinition> {
+        self.definitions()
+            .into_iter()
+            .filter(|definition| allowed.contains(&definition.name))
+            .collect()
     }
 
     pub(crate) fn metadata(&self, name: &str) -> Result<(RiskLevel, ApprovalPolicy), RuntimeError> {

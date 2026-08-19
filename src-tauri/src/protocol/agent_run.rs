@@ -10,6 +10,8 @@ pub struct StartRequest {
     pub model_id: String,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub content: String,
+    #[serde(default)]
+    pub skill_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +78,14 @@ pub struct Run {
     pub created_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    pub skills: Vec<RunSkill>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunSkill {
+    pub id: String,
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,11 +232,13 @@ mod tests {
             "modelId": "model-1",
             "reasoningEffort": "high",
             "content": "你好"
+            ,"skillIds": ["time_assistant"]
         }))
         .expect("valid run start request");
 
         assert_eq!(request.conversation_id, "conversation-1");
         assert_eq!(request.content, "你好");
+        assert_eq!(request.skill_ids, ["time_assistant"]);
     }
 
     #[test]
