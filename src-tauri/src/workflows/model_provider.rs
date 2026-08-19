@@ -89,6 +89,11 @@ pub async fn test_connection(
     client: &Client,
     request: TestConnectionRequest,
 ) -> AppResult<TestConnectionResponse> {
+    tracing::info!(
+        provider_id = %request.provider_id,
+        model_id = %request.model_id,
+        "model provider connection test started"
+    );
     let provider = model_provider::find(pool, &request.provider_id).await?;
     let preset = catalog::find_model_provider_preset(&provider.provider_key).ok_or_else(|| {
         crate::AppError::Other(format!(
@@ -148,9 +153,17 @@ pub async fn test_connection(
         return Err(ModelError::Protocol("connection test returned no text".into()).into());
     }
 
+    let latency_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    tracing::info!(
+        provider_id = %request.provider_id,
+        model_id = %request.model_id,
+        latency_ms,
+        "model provider connection test completed"
+    );
+
     Ok(TestConnectionResponse {
         model_id: request.model_id,
-        latency_ms: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        latency_ms,
     })
 }
 

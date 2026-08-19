@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::{
+    diagnostics::result::LogError,
     model_provider::catalog,
     protocol::model_provider::{
         CreateRequest, DeleteRequest, FindRequest, ModelProvider, ModelProviderPreset,
@@ -21,7 +22,9 @@ pub async fn model_provider_create(
     state: State<'_, AppState>,
     request: CreateRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider_workflow::create(state.db(), request).await
+    model_provider_workflow::create(state.db(), request)
+        .await
+        .log_error("model_provider_create")
 }
 
 #[tauri::command]
@@ -29,12 +32,16 @@ pub async fn model_provider_find(
     state: State<'_, AppState>,
     request: FindRequest,
 ) -> AppResult<ModelProvider> {
-    model_provider::find(state.db(), &request.id).await
+    model_provider::find(state.db(), &request.id)
+        .await
+        .log_error("model_provider_find")
 }
 
 #[tauri::command]
 pub async fn model_provider_list(state: State<'_, AppState>) -> AppResult<Vec<ModelProvider>> {
-    model_provider::list(state.db()).await
+    model_provider::list(state.db())
+        .await
+        .log_error("model_provider_list")
 }
 
 #[tauri::command]
@@ -52,6 +59,7 @@ pub async fn model_provider_update(
         },
     )
     .await
+    .log_error("model_provider_update")
 }
 
 #[tauri::command]
@@ -59,7 +67,9 @@ pub async fn model_provider_credential_replace(
     state: State<'_, AppState>,
     request: ReplaceCredentialRequest,
 ) -> AppResult<()> {
-    model_provider_workflow::replace_credential(state.db(), &request.id, &request.api_key).await
+    model_provider_workflow::replace_credential(state.db(), &request.id, &request.api_key)
+        .await
+        .log_error("model_provider_credential_replace")
 }
 
 #[tauri::command]
@@ -67,7 +77,9 @@ pub async fn model_provider_delete(
     state: State<'_, AppState>,
     request: DeleteRequest,
 ) -> AppResult<()> {
-    model_provider_workflow::delete(state.db(), &request.id).await
+    model_provider_workflow::delete(state.db(), &request.id)
+        .await
+        .log_error("model_provider_delete")
 }
 
 #[tauri::command]
@@ -75,5 +87,7 @@ pub async fn model_provider_test_connection(
     state: State<'_, AppState>,
     request: TestConnectionRequest,
 ) -> AppResult<TestConnectionResponse> {
-    model_provider_workflow::test_connection(state.db(), state.http(), request).await
+    model_provider_workflow::test_connection(state.db(), state.http(), request)
+        .await
+        .log_error("model_provider_test_connection")
 }

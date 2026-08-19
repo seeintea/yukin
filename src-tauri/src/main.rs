@@ -2,5 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    yukin_lib::run_crash_monitor_if_requested();
     yukin_lib::run()
 }

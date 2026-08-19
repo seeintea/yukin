@@ -108,6 +108,13 @@ pub(crate) async fn execute(
     tool_data_dir: PathBuf,
     events: EventSink,
 ) {
+    tracing::info!(
+        conversation_id = %prepared.conversation_id,
+        run_id = %prepared.response.run_id,
+        provider_id = %prepared.provider_id,
+        model_id = %prepared.model_id,
+        "agent run started"
+    );
     let mut emitter = EventEmitter::new(
         prepared.conversation_id.clone(),
         prepared.response.run_id.clone(),
@@ -140,6 +147,9 @@ pub(crate) async fn execute(
     .await;
     match result {
         StreamOutcome::Completed { content, usage } => {
+            let prompt_tokens = usage.as_ref().map(|value| value.prompt_tokens);
+            let completion_tokens = usage.as_ref().map(|value| value.completion_tokens);
+            let output_chars = content.chars().count();
             if let Err(error) = model_response::complete(
                 &pool,
                 &prepared.response.run_id,
@@ -152,6 +162,16 @@ pub(crate) async fn execute(
                 finish_failed(&pool, &prepared, &content, error, &mut emitter).await;
                 return;
             }
+            tracing::info!(
+                conversation_id = %prepared.conversation_id,
+                run_id = %prepared.response.run_id,
+                provider_id = %prepared.provider_id,
+                model_id = %prepared.model_id,
+                output_chars,
+                prompt_tokens,
+                completion_tokens,
+                "agent run completed"
+            );
             emitter.emit(EventKind::RunCompleted {});
         }
         StreamOutcome::Cancelled { content } => {
@@ -401,6 +421,15 @@ async fn execute_stream(
                 risk_level: risk_level.into(),
                 approval_policy: approval_policy.into(),
             });
+            tracing::debug!(
+                conversation_id = %prepared.conversation_id,
+                run_id = %prepared.response.run_id,
+                tool_call_id = %tool_call.id,
+                tool_name = %tool_call.function.name,
+                risk_level = risk_level.as_str(),
+                approval_policy = approval_policy.as_str(),
+                "tool call requested"
+            );
 
             let validation = registry.validate(&tool_call.function.name, &arguments);
             tool_call_count += 1;
@@ -440,6 +469,13 @@ async fn execute_stream(
                     arguments_digest: digest.clone(),
                     expires_at,
                 });
+                tracing::info!(
+                    conversation_id = %prepared.conversation_id,
+                    run_id = %prepared.response.run_id,
+                    tool_call_id = %tool_call.id,
+                    tool_name = %tool_call.function.name,
+                    "tool approval required"
+                );
 
                 let decision = tokio::select! {
                     changed = cancellation.changed() => {
@@ -549,6 +585,13 @@ async fn execute_stream(
                 tool_call_id: tool_call.id.clone(),
                 result,
             });
+            tracing::debug!(
+                conversation_id = %prepared.conversation_id,
+                run_id = %prepared.response.run_id,
+                tool_call_id = %tool_call.id,
+                tool_name = %tool_call.function.name,
+                "tool call completed"
+            );
             messages.push(Message::tool(tool_call.id, result_json));
         }
     }
@@ -608,8 +651,22 @@ async fn persist_tool_failure(
     if let Err(storage_error) =
         tool_call::fail(pool, tool_call_id, error.code(), &error.to_string()).await
     {
-        tracing::error!(%storage_error, %tool_call_id, "failed to persist tool call failure");
+        tracing::error!(
+            %storage_error,
+            conversation_id = %emitter.conversation_id,
+            run_id = %emitter.run_id,
+            %tool_call_id,
+            "failed to persist tool call failure"
+        );
     }
+    tracing::warn!(
+        conversation_id = %emitter.conversation_id,
+        run_id = %emitter.run_id,
+        %tool_call_id,
+        error_code = error.code(),
+        error = %error,
+        "tool call failed"
+    );
     emit_tool_failure(emitter, tool_call_id, error);
 }
 
@@ -639,8 +696,24 @@ async fn finish_failed(
     )
     .await
     {
-        tracing::error!(%storage_error, run_id = %prepared.response.run_id, "failed to persist run failure");
+        tracing::error!(
+            %storage_error,
+            conversation_id = %prepared.conversation_id,
+            run_id = %prepared.response.run_id,
+            provider_id = %prepared.provider_id,
+            model_id = %prepared.model_id,
+            "failed to persist run failure"
+        );
     }
+    tracing::error!(
+        conversation_id = %prepared.conversation_id,
+        run_id = %prepared.response.run_id,
+        provider_id = %prepared.provider_id,
+        model_id = %prepared.model_id,
+        %error_code,
+        error = %error_message,
+        "agent run failed"
+    );
     emitter.emit(EventKind::RunFailed {
         error_code,
         error_message,
@@ -664,6 +737,14 @@ async fn finish_cancelled(
         finish_failed(pool, prepared, content, error, emitter).await;
         return;
     }
+    tracing::info!(
+        conversation_id = %prepared.conversation_id,
+        run_id = %prepared.response.run_id,
+        provider_id = %prepared.provider_id,
+        model_id = %prepared.model_id,
+        output_chars = content.chars().count(),
+        "agent run cancelled"
+    );
     emitter.emit(EventKind::RunCancelled {});
 }
 

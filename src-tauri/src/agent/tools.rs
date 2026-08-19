@@ -277,7 +277,12 @@ async fn save_text_note(data_dir: &Path, arguments: &Value) -> Result<Value, Run
         .open(&path)
         .await
         .map_err(|error| tool_io_error(error.to_string()))?;
-    if let Err(error) = file.write_all(arguments.content.as_bytes()).await {
+    let write_result = async {
+        file.write_all(arguments.content.as_bytes()).await?;
+        file.flush().await
+    }
+    .await;
+    if let Err(error) = write_result {
         drop(file);
         let _ = tokio::fs::remove_file(&path).await;
         return Err(tool_io_error(error.to_string()));

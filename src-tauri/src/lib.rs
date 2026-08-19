@@ -11,17 +11,40 @@ mod workflows;
 
 pub use error::{AppError, AppResult};
 pub use state::AppState;
+use std::sync::mpsc;
 use tauri::Manager;
+
+pub fn run_crash_monitor_if_requested() {
+    diagnostics::crash::run_monitor_if_requested();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    diagnostics::tracing::init();
+    let (diagnostics_sender, diagnostics_receiver) = mpsc::sync_channel(1);
+    let run_result = tauri::Builder::default()
+        .setup(move |app| {
+            let (log_dir, log_dir_error) = match app.path().app_log_dir() {
+                Ok(log_dir) => (Some(log_dir), None),
+                Err(error) => (None, Some(error)),
+            };
+            let diagnostics = diagnostics::init(log_dir.as_deref());
+            let _ = diagnostics_sender.send(diagnostics);
+            if let Some(error) = log_dir_error {
+                tracing::error!(
+                    %error,
+                    "failed to resolve application log directory; using console logging only"
+                );
+            }
 
-    tauri::Builder::default()
-        .setup(|app| {
             let handle = app.handle().clone();
-            let state =
-                tauri::async_runtime::block_on(async move { AppState::new(&handle).await })?;
+            let state = tauri::async_runtime::block_on(async move { AppState::new(&handle).await })
+                .inspect_err(|error| {
+                    tracing::error!(
+                        error_code = error.code(),
+                        error = %error,
+                        "application state initialization failed"
+                    );
+                })?;
 
             app.manage(state);
 
@@ -42,6 +65,7 @@ pub fn run() {
             commands::conversation::conversation_message_list,
             commands::conversation::conversation_rename,
             commands::conversation::conversation_delete,
+            commands::diagnostics::diagnostics_frontend_error_report,
             commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,
@@ -51,6 +75,13 @@ pub fn run() {
             commands::model_provider::model_provider_delete,
             commands::model_provider::model_provider_test_connection,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running yukin.");
+        .run(tauri::generate_context!());
+
+    if let Err(error) = &run_result {
+        tracing::error!(%error, "tauri runtime failed");
+    }
+    drop(diagnostics_receiver);
+    if let Err(error) = run_result {
+        eprintln!("error while running yukin: {error}");
+    }
 }

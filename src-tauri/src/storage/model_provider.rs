@@ -79,7 +79,7 @@ pub async fn create(pool: &SqlitePool, params: CreateParams) -> AppResult<ModelP
     .fetch_one(pool)
     .await?;
 
-    tracing::info!(provider_id = %&record.id, "model provider created");
+    tracing::debug!(provider_id = %&record.id, "model provider created");
     record.try_into()
 }
 
@@ -115,7 +115,7 @@ async fn find_record(pool: &SqlitePool, id: &str) -> AppResult<ModelProviderReco
     .fetch_one(pool)
     .await?;
 
-    tracing::info!(provider_id = %record.id, "model provider loaded");
+    tracing::debug!(provider_id = %record.id, "model provider loaded");
     Ok(record)
 }
 
@@ -133,7 +133,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<ModelProvider>> {
     .fetch_all(pool)
     .await?;
 
-    tracing::info!(count = records.len(), "model providers listed");
+    tracing::debug!(count = records.len(), "model providers listed");
     records.into_iter().map(TryInto::try_into).collect()
 }
 
@@ -159,7 +159,7 @@ pub async fn update(pool: &SqlitePool, params: UpdateParams) -> AppResult<ModelP
     .fetch_one(pool)
     .await?;
 
-    tracing::info!(provider_id = %record.id, "model provider updated");
+    tracing::debug!(provider_id = %record.id, "model provider updated");
     record.try_into()
 }
 
@@ -176,7 +176,7 @@ pub async fn delete(pool: &SqlitePool, id: &str) -> AppResult<()> {
     .execute(pool)
     .await?;
 
-    tracing::info!(
+    tracing::debug!(
         provider_id = %id,
         rows_affected = result.rows_affected(),
         "model provider soft deleted"

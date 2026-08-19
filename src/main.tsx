@@ -3,6 +3,7 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 
+import { installGlobalErrorHandlers, reactErrorHandlers } from "./diagnostics";
 import { routeTree } from "./routeTree.gen";
 
 import "./index.css";
@@ -14,9 +15,11 @@ const router = createRouter({
   context: { queryClient },
 });
 
+installGlobalErrorHandlers();
+
 const rootElement = document.getElementById("root")!;
 if (!rootElement.innerHTML) {
-  const root = ReactDOM.createRoot(rootElement);
+  const root = ReactDOM.createRoot(rootElement, reactErrorHandlers);
   root.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

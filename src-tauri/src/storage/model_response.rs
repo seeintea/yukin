@@ -524,6 +524,52 @@ pub(crate) async fn recover_interrupted(pool: &SqlitePool) -> AppResult<u64> {
     Ok(result.rows_affected())
 }
 
+pub(crate) async fn fail_panicked(pool: &SqlitePool, run_id: &str) -> AppResult<()> {
+    const ERROR_CODE: &str = "run_panicked";
+    const ERROR_MESSAGE: &str = "agent run stopped because its background task panicked";
+
+    let mut transaction = pool.begin().await?;
+    sqlx::query(
+        r#"
+        UPDATE messages
+        SET status = 'failed', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE run_id = ? AND status = 'streaming'
+        "#,
+    )
+    .bind(run_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE tool_calls
+        SET status = 'failed', error_code = ?, error_message = ?,
+            completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE run_id = ? AND status IN ('requested', 'waiting_approval', 'running')
+        "#,
+    )
+    .bind(ERROR_CODE)
+    .bind(ERROR_MESSAGE)
+    .bind(run_id)
+    .execute(&mut *transaction)
+    .await?;
+    let result = sqlx::query(
+        r#"
+        UPDATE runs
+        SET status = 'failed', error_code = ?, error_message = ?,
+            completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ? AND status IN ('pending', 'running', 'waiting_approval')
+        "#,
+    )
+    .bind(ERROR_CODE)
+    .bind(ERROR_MESSAGE)
+    .bind(run_id)
+    .execute(&mut *transaction)
+    .await?;
+    ensure_transition(result.rows_affected(), run_id, "active", "failed")?;
+    transaction.commit().await?;
+    Ok(())
+}
+
 fn ensure_transition(rows_affected: u64, id: &str, expected: &str, target: &str) -> AppResult<()> {
     if rows_affected == 1 {
         Ok(())

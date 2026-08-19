@@ -14,7 +14,7 @@ pub async fn connect(app: &AppHandle) -> AppResult<SqlitePool> {
     create_dir_all(&data_dir)?;
 
     let db_path = data_dir.join("yukin.db");
-    tracing::info!(?db_path, "opening db");
+    tracing::debug!(?db_path, "opening database");
 
     let options = SqliteConnectOptions::new()
         .filename(&db_path)

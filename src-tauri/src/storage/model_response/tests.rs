@@ -3,8 +3,8 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use crate::{agent::TokenUsage, protocol::agent_run::RunStatus, AppError};
 
 use super::{
-    cancel, complete, mark_started, recover_interrupted, snapshot, start, update_partial, RunSkill,
-    StartParams,
+    cancel, complete, fail_panicked, mark_started, recover_interrupted, snapshot, start,
+    update_partial, RunSkill, StartParams,
 };
 
 async fn setup() -> SqlitePool {
@@ -129,6 +129,31 @@ async fn recovers_interrupted_run_and_preserves_partial_output() {
             .as_str(),
         Some("failed")
     );
+}
+
+#[tokio::test]
+async fn fails_panicked_run_and_preserves_partial_output() {
+    let pool = setup().await;
+    start(&pool, start_params("run-panicked"))
+        .await
+        .expect("start run");
+    mark_started(&pool, "run-panicked")
+        .await
+        .expect("mark started");
+    update_partial(&pool, "run-panicked-assistant", "panic 前内容")
+        .await
+        .expect("partial output");
+
+    fail_panicked(&pool, "run-panicked")
+        .await
+        .expect("fail panicked run");
+
+    let failed = snapshot(&pool, "run-panicked")
+        .await
+        .expect("failed snapshot");
+    assert_eq!(failed.run.status, RunStatus::Failed);
+    assert_eq!(failed.run.error_code.as_deref(), Some("run_panicked"));
+    assert_eq!(failed.assistant_message.content, "panic 前内容");
 }
 
 #[tokio::test]
