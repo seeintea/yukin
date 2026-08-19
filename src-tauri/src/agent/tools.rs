@@ -1,46 +1,117 @@
+use std::path::{Component, Path, PathBuf};
+
 use chrono::{FixedOffset, SecondsFormat, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
+
+use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
 use super::{RuntimeError, ToolDefinition};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RiskLevel {
     ReadOnly,
+    Write,
+}
+
+impl RiskLevel {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::Write => "write",
+        }
+    }
+}
+
+impl From<RiskLevel> for ToolRiskLevel {
+    fn from(value: RiskLevel) -> Self {
+        match value {
+            RiskLevel::ReadOnly => Self::ReadOnly,
+            RiskLevel::Write => Self::Write,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ApprovalPolicy {
     Never,
+    Always,
 }
 
-pub(crate) struct ToolRegistry;
+impl ApprovalPolicy {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::Always => "always",
+        }
+    }
+}
+
+impl From<ApprovalPolicy> for ToolApprovalPolicy {
+    fn from(value: ApprovalPolicy) -> Self {
+        match value {
+            ApprovalPolicy::Never => Self::Never,
+            ApprovalPolicy::Always => Self::Always,
+        }
+    }
+}
+
+pub(crate) struct ToolRegistry {
+    data_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ExecutionAuthorization {
+    NotRequired,
+    Approved { arguments_digest: String },
+}
 
 impl ToolRegistry {
-    pub(crate) fn built_in() -> Self {
-        Self
+    pub(crate) fn built_in(data_dir: PathBuf) -> Self {
+        Self { data_dir }
     }
 
     pub(crate) fn definitions(&self) -> Vec<ToolDefinition> {
-        vec![ToolDefinition {
-            name: "current_time".into(),
-            description: "Get the current date and time for a UTC offset. Use this when the user asks for the current time or date.".into(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "utcOffset": {
-                        "type": "string",
-                        "description": "UTC offset in ±HH:MM format, for example +08:00. Defaults to +00:00."
-                    }
-                },
-                "additionalProperties": false
-            }),
-        }]
+        vec![
+            ToolDefinition {
+                name: "current_time".into(),
+                description: "Get the current date and time for a UTC offset. Use this when the user asks for the current time or date.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "utcOffset": {
+                            "type": "string",
+                            "description": "UTC offset in ±HH:MM format, for example +08:00. Defaults to +00:00."
+                        }
+                    },
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
+                name: "save_text_note".into(),
+                description: "Create a new UTF-8 text note in the app's managed agent-files directory. Existing files are never overwritten. This changes the filesystem and always requires user approval.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "fileName": {
+                            "type": "string",
+                            "description": "A plain .txt file name without directories, for example notes.txt."
+                        },
+                        "content": { "type": "string", "description": "Text to save." }
+                    },
+                    "required": ["fileName", "content"],
+                    "additionalProperties": false
+                }),
+            },
+        ]
     }
 
     pub(crate) fn metadata(&self, name: &str) -> Result<(RiskLevel, ApprovalPolicy), RuntimeError> {
         match name {
             "current_time" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
+            "save_text_note" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -49,13 +120,59 @@ impl ToolRegistry {
         &self,
         name: &str,
         arguments: &Value,
+        authorization: ExecutionAuthorization,
     ) -> Result<Value, RuntimeError> {
-        self.metadata(name)?;
+        let (_, approval_policy) = self.metadata(name)?;
+        match (approval_policy, authorization) {
+            (ApprovalPolicy::Never, ExecutionAuthorization::NotRequired) => {}
+            (
+                ApprovalPolicy::Always,
+                ExecutionAuthorization::Approved {
+                    arguments_digest: approved_digest,
+                },
+            ) if arguments_digest(arguments)?.1 == approved_digest => {}
+            _ => return Err(RuntimeError::InvalidToolApproval(name.into())),
+        }
+        self.validate(name, arguments)?;
         match name {
             "current_time" => current_time(arguments),
+            "save_text_note" => save_text_note(&self.data_dir, arguments).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
+
+    pub(crate) fn validate(&self, name: &str, arguments: &Value) -> Result<(), RuntimeError> {
+        match name {
+            "current_time" => {
+                let arguments: CurrentTimeArguments = serde_json::from_value(arguments.clone())
+                    .map_err(|error| RuntimeError::InvalidToolArguments {
+                        name: name.into(),
+                        message: error.to_string(),
+                    })?;
+                parse_utc_offset(&arguments.utc_offset)?;
+                Ok(())
+            }
+            "save_text_note" => {
+                let arguments: SaveTextNoteArguments = serde_json::from_value(arguments.clone())
+                    .map_err(|error| RuntimeError::InvalidToolArguments {
+                        name: name.into(),
+                        message: error.to_string(),
+                    })?;
+                validate_note_arguments(&arguments)
+            }
+            _ => Err(RuntimeError::ToolNotFound(name.into())),
+        }
+    }
+}
+
+pub(crate) fn arguments_digest(arguments: &Value) -> Result<(String, String), RuntimeError> {
+    let canonical =
+        serde_json::to_string(arguments).map_err(|error| RuntimeError::ToolExecution {
+            name: "arguments".into(),
+            message: error.to_string(),
+        })?;
+    let digest = hex::encode(Sha256::digest(canonical.as_bytes()));
+    Ok((canonical, digest))
 }
 
 #[derive(Deserialize)]
@@ -117,39 +234,187 @@ fn invalid_offset(value: &str) -> RuntimeError {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SaveTextNoteArguments {
+    file_name: String,
+    content: String,
+}
+
+async fn save_text_note(data_dir: &Path, arguments: &Value) -> Result<Value, RuntimeError> {
+    let arguments: SaveTextNoteArguments =
+        serde_json::from_value(arguments.clone()).map_err(|error| {
+            RuntimeError::InvalidToolArguments {
+                name: "save_text_note".into(),
+                message: error.to_string(),
+            }
+        })?;
+    validate_note_arguments(&arguments)?;
+    tokio::fs::create_dir_all(data_dir)
+        .await
+        .map_err(|error| tool_io_error(error.to_string()))?;
+    let path = data_dir.join(&arguments.file_name);
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .await
+        .map_err(|error| tool_io_error(error.to_string()))?;
+    if let Err(error) = file.write_all(arguments.content.as_bytes()).await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(tool_io_error(error.to_string()));
+    }
+    Ok(json!({
+        "fileName": arguments.file_name,
+        "path": path,
+        "saved": true
+    }))
+}
+
+fn validate_note_arguments(arguments: &SaveTextNoteArguments) -> Result<(), RuntimeError> {
+    let path = Path::new(&arguments.file_name);
+    let valid_name = arguments.file_name.len() <= 128
+        && !arguments.file_name.starts_with('.')
+        && path.extension().and_then(|value| value.to_str()) == Some("txt")
+        && matches!(
+            path.components().collect::<Vec<_>>().as_slice(),
+            [Component::Normal(_)]
+        );
+    if !valid_name {
+        return Err(RuntimeError::InvalidToolArguments {
+            name: "save_text_note".into(),
+            message: "fileName must be a plain .txt name without directories".into(),
+        });
+    }
+    if arguments.content.len() > 32 * 1024 {
+        return Err(RuntimeError::InvalidToolArguments {
+            name: "save_text_note".into(),
+            message: "content must not exceed 32 KiB".into(),
+        });
+    }
+    Ok(())
+}
+
+fn tool_io_error(message: String) -> RuntimeError {
+    RuntimeError::ToolExecution {
+        name: "save_text_note".into(),
+        message,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use serde_json::json;
 
-    use super::ToolRegistry;
+    use super::{arguments_digest, ExecutionAuthorization, ToolRegistry};
     use crate::agent::RuntimeError;
 
     #[test]
     fn rejects_unknown_and_invalid_tool_arguments() {
-        let runtime = tauri::async_runtime::block_on(
-            ToolRegistry::built_in()
-                .execute("current_time", &json!({ "utcOffset": "Asia/Shanghai" })),
-        );
+        let runtime =
+            tauri::async_runtime::block_on(ToolRegistry::built_in(PathBuf::new()).execute(
+                "current_time",
+                &json!({ "utcOffset": "Asia/Shanghai" }),
+                ExecutionAuthorization::NotRequired,
+            ));
         assert!(matches!(
             runtime,
             Err(RuntimeError::InvalidToolArguments { .. })
         ));
 
         let unknown =
-            tauri::async_runtime::block_on(ToolRegistry::built_in().execute("missing", &json!({})));
+            tauri::async_runtime::block_on(ToolRegistry::built_in(PathBuf::new()).execute(
+                "missing",
+                &json!({}),
+                ExecutionAuthorization::NotRequired,
+            ));
         assert_eq!(unknown, Err(RuntimeError::ToolNotFound("missing".into())));
     }
 
     #[test]
     fn executes_current_time_for_valid_offset() {
-        let output = tauri::async_runtime::block_on(
-            ToolRegistry::built_in().execute("current_time", &json!({ "utcOffset": "+08:00" })),
-        )
-        .expect("current time output");
+        let output =
+            tauri::async_runtime::block_on(ToolRegistry::built_in(PathBuf::new()).execute(
+                "current_time",
+                &json!({ "utcOffset": "+08:00" }),
+                ExecutionAuthorization::NotRequired,
+            ))
+            .expect("current time output");
 
         assert_eq!(output["utcOffset"], "+08:00");
         assert!(output["dateTime"]
             .as_str()
             .is_some_and(|value| value.ends_with("+08:00")));
+    }
+
+    #[test]
+    fn rejects_note_paths_outside_managed_directory() {
+        let output = tauri::async_runtime::block_on(
+            ToolRegistry::built_in(PathBuf::new()).execute(
+                "save_text_note",
+                &json!({ "fileName": "../note.txt", "content": "unsafe" }),
+                ExecutionAuthorization::Approved {
+                    arguments_digest: arguments_digest(
+                        &json!({ "fileName": "../note.txt", "content": "unsafe" }),
+                    )
+                    .expect("arguments digest")
+                    .1,
+                },
+            ),
+        );
+
+        assert!(matches!(
+            output,
+            Err(RuntimeError::InvalidToolArguments { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn creates_note_once_without_overwriting_existing_file() {
+        let directory =
+            std::env::temp_dir().join(format!("yukin-tool-test-{}", uuid::Uuid::now_v7()));
+        let registry = ToolRegistry::built_in(directory.clone());
+        let arguments = json!({ "fileName": "note.txt", "content": "approved content" });
+        let digest = arguments_digest(&arguments).expect("arguments digest").1;
+
+        assert!(registry
+            .execute(
+                "save_text_note",
+                &arguments,
+                ExecutionAuthorization::NotRequired,
+            )
+            .await
+            .is_err());
+        assert!(!directory.join("note.txt").exists());
+
+        registry
+            .execute(
+                "save_text_note",
+                &arguments,
+                ExecutionAuthorization::Approved {
+                    arguments_digest: digest.clone(),
+                },
+            )
+            .await
+            .expect("new note");
+        assert_eq!(
+            std::fs::read_to_string(directory.join("note.txt")).expect("saved note"),
+            "approved content"
+        );
+        assert!(registry
+            .execute(
+                "save_text_note",
+                &arguments,
+                ExecutionAuthorization::Approved {
+                    arguments_digest: digest,
+                },
+            )
+            .await
+            .is_err());
+
+        std::fs::remove_dir_all(directory).expect("remove test directory");
     }
 }

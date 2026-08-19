@@ -43,17 +43,46 @@ export interface AgentRun {
 export interface AgentRunSnapshot {
   run: AgentRun;
   assistantMessage: ConversationMessage;
+  toolCalls: ToolCallSnapshot[];
 }
 
-export type ToolCallStatus = "requested" | "running" | "completed" | "failed";
+export type ToolCallStatus =
+  | "requested"
+  | "waiting_approval"
+  | "running"
+  | "completed"
+  | "failed"
+  | "rejected"
+  | "cancelled";
+export type ToolRiskLevel = "read_only" | "write";
+export type ToolApprovalPolicy = "never" | "always";
 
-export interface ActiveToolCall {
+export interface ToolCallSnapshot {
   id: string;
+  runId: string;
   name: string;
   arguments: unknown;
+  argumentsDigest: string;
   status: ToolCallStatus;
   result: unknown | null;
+  riskLevel: ToolRiskLevel;
+  approvalPolicy: ToolApprovalPolicy;
+  errorCode: string | null;
   errorMessage: string | null;
+  approvalExpiresAt: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export type ActiveToolCall = ToolCallSnapshot;
+
+export type ToolCallDecision = "allow" | "reject";
+
+export interface ToolCallDecideRequest {
+  runId: string;
+  toolCallId: string;
+  argumentsDigest: string;
+  decision: ToolCallDecision;
 }
 
 interface AgentRunEventEnvelope<TEvent extends string, TData> {
@@ -77,7 +106,18 @@ export type AgentRunEvent =
     >
   | AgentRunEventEnvelope<
       "tool_call_requested",
-      { toolCallId: string; name: string; arguments: unknown }
+      {
+        toolCallId: string;
+        name: string;
+        arguments: unknown;
+        argumentsDigest: string;
+        riskLevel: ToolRiskLevel;
+        approvalPolicy: ToolApprovalPolicy;
+      }
+    >
+  | AgentRunEventEnvelope<
+      "tool_approval_required",
+      { toolCallId: string; argumentsDigest: string; expiresAt: string }
     >
   | AgentRunEventEnvelope<"tool_call_started", { toolCallId: string }>
   | AgentRunEventEnvelope<"tool_call_completed", { toolCallId: string; result: unknown }>
@@ -85,6 +125,7 @@ export type AgentRunEvent =
       "tool_call_failed",
       { toolCallId: string; errorCode: string; errorMessage: string }
     >
+  | AgentRunEventEnvelope<"tool_call_rejected", { toolCallId: string }>
   | AgentRunEventEnvelope<"run_completed", Record<string, never>>
   | AgentRunEventEnvelope<"run_failed", { errorCode: string; errorMessage: string }>
   | AgentRunEventEnvelope<"run_cancelled", Record<string, never>>;

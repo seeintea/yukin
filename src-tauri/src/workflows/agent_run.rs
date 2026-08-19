@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, collections::HashSet, time::Duration};
+use std::{collections::BTreeMap, collections::HashSet, path::PathBuf, time::Duration};
 
 use chrono::{SecondsFormat, Utc};
 use futures_util::StreamExt;
@@ -9,15 +9,18 @@ use uuid::Uuid;
 
 use crate::{
     agent::{
-        self, tools::ToolRegistry, CompletionRequest, Message, ModelError, Role, RuntimeError,
-        ThinkingMode, TokenUsage, ToolCall, ToolCallFunction, ToolCallType,
+        self,
+        tools::{arguments_digest, ApprovalPolicy, ExecutionAuthorization, ToolRegistry},
+        CompletionRequest, Message, ModelError, Role, RuntimeError, ThinkingMode, TokenUsage,
+        ToolCall, ToolCallFunction, ToolCallType,
     },
     protocol::{
-        agent_run::{Event, EventKind, Phase, StartRequest, StartResponse},
+        agent_run::{Event, EventKind, Phase, StartRequest, StartResponse, ToolCallDecision},
         model_provider::ReasoningEffort,
     },
     security::keychain,
-    storage::{model_provider, model_response},
+    state::ActiveRuns,
+    storage::{model_provider, model_response, tool_call},
     AppError, AppResult,
 };
 
@@ -27,6 +30,7 @@ const MAX_MODEL_STEPS: usize = 4;
 const MAX_TOOL_CALLS: usize = 4;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_TOOL_OUTPUT_BYTES: usize = 32 * 1024;
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) type EventSink = Box<dyn Fn(Event) + Send + Sync>;
 
@@ -91,6 +95,8 @@ pub(crate) async fn execute(
     client: Client,
     prepared: PreparedRun,
     mut cancellation: watch::Receiver<bool>,
+    active_runs: ActiveRuns,
+    tool_data_dir: PathBuf,
     events: EventSink,
 ) {
     let mut emitter = EventEmitter::new(
@@ -113,7 +119,16 @@ pub(crate) async fn execute(
         return;
     }
 
-    let result = execute_stream(&pool, &client, &prepared, &mut cancellation, &mut emitter).await;
+    let result = execute_stream(
+        &pool,
+        &client,
+        &prepared,
+        &mut cancellation,
+        &active_runs,
+        tool_data_dir,
+        &mut emitter,
+    )
+    .await;
     match result {
         StreamOutcome::Completed { content, usage } => {
             if let Err(error) = model_response::complete(
@@ -158,6 +173,8 @@ async fn execute_stream(
     client: &Client,
     prepared: &PreparedRun,
     cancellation: &mut watch::Receiver<bool>,
+    active_runs: &ActiveRuns,
+    tool_data_dir: PathBuf,
     emitter: &mut EventEmitter,
 ) -> StreamOutcome {
     let config = match model_provider::find_runtime_config(pool, &prepared.provider_id).await {
@@ -169,7 +186,7 @@ async fn execute_stream(
         Ok(None) => return failed("", ModelError::MissingCredential.into()),
         Err(error) => return failed("", error),
     };
-    let registry = ToolRegistry::built_in();
+    let registry = ToolRegistry::built_in(tool_data_dir);
     let mut messages = prepared.messages.clone();
     let mut content = String::new();
     let mut usage = TokenUsage {
@@ -327,41 +344,144 @@ async fn execute_stream(
                 match serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
                     Ok(arguments) => arguments,
                     Err(error) => {
-                        emitter.emit(EventKind::ToolCallRequested {
-                            tool_call_id: tool_call.id.clone(),
-                            name: tool_call.function.name.clone(),
-                            arguments: serde_json::Value::String(
-                                tool_call.function.arguments.clone(),
-                            ),
-                        });
-                        let error = RuntimeError::InvalidToolArguments {
-                            name: tool_call.function.name,
-                            message: error.to_string(),
-                        };
-                        emit_tool_failure(emitter, &tool_call.id, &error);
-                        return failed(content, error.into());
+                        return failed(
+                            content,
+                            RuntimeError::InvalidToolArguments {
+                                name: tool_call.function.name,
+                                message: error.to_string(),
+                            }
+                            .into(),
+                        );
                     }
                 };
+            let (risk_level, approval_policy) = match registry.metadata(&tool_call.function.name) {
+                Ok(metadata) => metadata,
+                Err(error) => return failed(content, error.into()),
+            };
+            let (arguments_json, digest) = match arguments_digest(&arguments) {
+                Ok(value) => value,
+                Err(error) => return failed(content, error.into()),
+            };
+            if let Err(error) = tool_call::create(
+                pool,
+                tool_call::CreateParams {
+                    id: &tool_call.id,
+                    run_id: &prepared.response.run_id,
+                    name: &tool_call.function.name,
+                    arguments_json: &arguments_json,
+                    arguments_digest: &digest,
+                    risk_level: risk_level.as_str(),
+                    approval_policy: approval_policy.as_str(),
+                },
+            )
+            .await
+            {
+                return failed(content, error);
+            }
             emitter.emit(EventKind::ToolCallRequested {
                 tool_call_id: tool_call.id.clone(),
                 name: tool_call.function.name.clone(),
                 arguments: arguments.clone(),
+                arguments_digest: digest.clone(),
+                risk_level: risk_level.into(),
+                approval_policy: approval_policy.into(),
             });
+
+            let validation = registry.validate(&tool_call.function.name, &arguments);
             tool_call_count += 1;
-            if tool_call_count > MAX_TOOL_CALLS {
-                let error = RuntimeError::ToolCallLimit;
-                emit_tool_failure(emitter, &tool_call.id, &error);
+            let signature = format!("{}:{arguments_json}", tool_call.function.name);
+            let policy_error = if tool_call_count > MAX_TOOL_CALLS {
+                Some(RuntimeError::ToolCallLimit)
+            } else if !prior_tool_calls.insert(signature) {
+                Some(RuntimeError::RepeatedToolCall(
+                    tool_call.function.name.clone(),
+                ))
+            } else {
+                validation.err()
+            };
+            if let Some(error) = policy_error {
+                persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
                 return failed(content, error.into());
             }
-            let signature = format!("{}:{arguments}", tool_call.function.name);
-            if !prior_tool_calls.insert(signature) {
-                let error = RuntimeError::RepeatedToolCall(tool_call.function.name);
-                emit_tool_failure(emitter, &tool_call.id, &error);
-                return failed(content, error.into());
+
+            let mut authorization = ExecutionAuthorization::NotRequired;
+            if approval_policy == ApprovalPolicy::Always {
+                let approval = active_runs
+                    .wait_for_approval(prepared.response.run_id.clone(), tool_call.id.clone());
+                let expires_at = (Utc::now() + chrono::Duration::minutes(5))
+                    .to_rfc3339_opts(SecondsFormat::Millis, true);
+                if let Err(error) = tool_call::wait_for_approval(
+                    pool,
+                    &prepared.response.run_id,
+                    &tool_call.id,
+                    &expires_at,
+                )
+                .await
+                {
+                    return failed(content, error);
+                }
+                emitter.emit(EventKind::ToolApprovalRequired {
+                    tool_call_id: tool_call.id.clone(),
+                    arguments_digest: digest.clone(),
+                    expires_at,
+                });
+
+                let decision = tokio::select! {
+                    changed = cancellation.changed() => {
+                        if changed.is_ok() && *cancellation.borrow() {
+                            return StreamOutcome::Cancelled { content };
+                        }
+                        return failed(content, AppError::Other("run cancellation channel closed".into()));
+                    }
+                    result = timeout(APPROVAL_TIMEOUT, approval) => result,
+                };
+                match decision {
+                    Ok(Ok(ToolCallDecision::Allow)) => {
+                        if let Err(error) = registry.validate(&tool_call.function.name, &arguments)
+                        {
+                            persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
+                            return failed(content, error.into());
+                        }
+                        authorization = ExecutionAuthorization::Approved {
+                            arguments_digest: digest,
+                        };
+                    }
+                    Ok(Ok(ToolCallDecision::Reject)) => {
+                        emitter.emit(EventKind::ToolCallRejected {
+                            tool_call_id: tool_call.id.clone(),
+                        });
+                        messages.push(Message::tool(
+                            tool_call.id,
+                            r#"{"status":"rejected","message":"User rejected this tool call"}"#
+                                .into(),
+                        ));
+                        continue;
+                    }
+                    Ok(Err(_)) => {
+                        let error = RuntimeError::ToolExecution {
+                            name: tool_call.function.name,
+                            message: "approval channel closed".into(),
+                        };
+                        persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
+                        return failed(content, error.into());
+                    }
+                    Err(_) => {
+                        let error = RuntimeError::ApprovalExpired(tool_call.function.name);
+                        if let Err(storage_error) =
+                            tool_call::expire(pool, &prepared.response.run_id, &tool_call.id).await
+                        {
+                            return failed(content, storage_error);
+                        }
+                        emit_tool_failure(emitter, &tool_call.id, &error);
+                        return failed(content, error.into());
+                    }
+                }
             }
-            if let Err(error) = registry.metadata(&tool_call.function.name) {
-                emit_tool_failure(emitter, &tool_call.id, &error);
-                return failed(content, error.into());
+
+            if let Err(error) =
+                tool_call::mark_running(pool, &prepared.response.run_id, &tool_call.id).await
+            {
+                return failed(content, error);
             }
             emitter.emit(EventKind::ToolCallStarted {
                 tool_call_id: tool_call.id.clone(),
@@ -376,18 +496,18 @@ async fn execute_stream(
                 }
                 result = timeout(
                     TOOL_TIMEOUT,
-                    registry.execute(&tool_call.function.name, &arguments),
+                    registry.execute(&tool_call.function.name, &arguments, authorization),
                 ) => result,
             };
             let result = match execution {
                 Ok(Ok(result)) => result,
                 Ok(Err(error)) => {
-                    emit_tool_failure(emitter, &tool_call.id, &error);
+                    persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
                     return failed(content, error.into());
                 }
                 Err(_) => {
                     let error = RuntimeError::ToolTimeout(tool_call.function.name);
-                    emit_tool_failure(emitter, &tool_call.id, &error);
+                    persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
                     return failed(content, error.into());
                 }
             };
@@ -395,7 +515,7 @@ async fn execute_stream(
                 Ok(result_json) if result_json.len() <= MAX_TOOL_OUTPUT_BYTES => result_json,
                 Ok(_) => {
                     let error = RuntimeError::ToolOutputLimit(tool_call.function.name);
-                    emit_tool_failure(emitter, &tool_call.id, &error);
+                    persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
                     return failed(content, error.into());
                 }
                 Err(error) => {
@@ -403,10 +523,13 @@ async fn execute_stream(
                         name: tool_call.function.name,
                         message: error.to_string(),
                     };
-                    emit_tool_failure(emitter, &tool_call.id, &error);
+                    persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
                     return failed(content, error.into());
                 }
             };
+            if let Err(error) = tool_call::complete(pool, &tool_call.id, &result_json).await {
+                return failed(content, error);
+            }
             emitter.emit(EventKind::ToolCallCompleted {
                 tool_call_id: tool_call.id.clone(),
                 result,
@@ -459,6 +582,20 @@ fn emit_tool_failure(emitter: &mut EventEmitter, tool_call_id: &str, error: &Run
         error_code: error.code().into(),
         error_message: error.to_string(),
     });
+}
+
+async fn persist_tool_failure(
+    pool: &SqlitePool,
+    emitter: &mut EventEmitter,
+    tool_call_id: &str,
+    error: &RuntimeError,
+) {
+    if let Err(storage_error) =
+        tool_call::fail(pool, tool_call_id, error.code(), &error.to_string()).await
+    {
+        tracing::error!(%storage_error, %tool_call_id, "failed to persist tool call failure");
+    }
+    emit_tool_failure(emitter, tool_call_id, error);
 }
 
 fn failed(content: impl Into<String>, error: AppError) -> StreamOutcome {

@@ -33,6 +33,7 @@ pub fn run() {
             commands::agent_run::agent_run_start,
             commands::agent_run::agent_run_snapshot,
             commands::agent_run::agent_run_cancel,
+            commands::agent_run::tool_call_decide,
             commands::conversation::conversation_current,
             commands::conversation::conversation_find,
             commands::conversation::conversation_list,

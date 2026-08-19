@@ -7,6 +7,7 @@ use crate::{
         common::RecordMetadata,
         conversation::{Message, MessageRole, MessageStatus},
     },
+    storage::tool_call,
     AppError, AppResult,
 };
 
@@ -334,6 +335,19 @@ pub(crate) async fn fail(
     .bind(run_id)
     .execute(&mut *transaction)
     .await?;
+    sqlx::query(
+        r#"
+        UPDATE tool_calls
+        SET status = 'failed', error_code = ?, error_message = ?,
+            completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE run_id = ? AND status IN ('requested', 'waiting_approval', 'running')
+        "#,
+    )
+    .bind(error_code)
+    .bind(error_message)
+    .bind(run_id)
+    .execute(&mut *transaction)
+    .await?;
     ensure_transition(
         message_result.rows_affected(),
         assistant_message_id,
@@ -369,6 +383,16 @@ pub(crate) async fn cancel(
         UPDATE runs
         SET status = 'cancelled', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE id = ? AND status IN ('pending', 'running', 'waiting_approval')
+        "#,
+    )
+    .bind(run_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE tool_calls
+        SET status = 'cancelled', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE run_id = ? AND status IN ('requested', 'waiting_approval', 'running')
         "#,
     )
     .bind(run_id)
@@ -413,9 +437,12 @@ pub(crate) async fn snapshot(pool: &SqlitePool, run_id: &str) -> AppResult<Snaps
     .await?
     .try_into()?;
 
+    let tool_calls = tool_call::list(pool, run_id).await?;
+
     Ok(Snapshot {
         run,
         assistant_message,
+        tool_calls,
     })
 }
 
@@ -426,6 +453,21 @@ pub(crate) async fn recover_interrupted(pool: &SqlitePool) -> AppResult<u64> {
         UPDATE messages
         SET status = 'failed', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
         WHERE status = 'streaming'
+          AND run_id IN (
+              SELECT id FROM runs
+              WHERE status IN ('pending', 'running', 'waiting_approval')
+          )
+        "#,
+    )
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE tool_calls
+        SET status = 'failed', error_code = 'run_interrupted',
+            error_message = 'run was interrupted by application shutdown',
+            completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE status IN ('requested', 'waiting_approval', 'running')
           AND run_id IN (
               SELECT id FROM runs
               WHERE status IN ('pending', 'running', 'waiting_approval')

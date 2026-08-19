@@ -5,6 +5,7 @@ import type {
   AgentRunSnapshot,
   AgentRunStartRequest,
   AgentRunStartResponse,
+  ToolCallDecideRequest,
 } from "#/protocol/agent-run";
 
 export function agentRunStart(
@@ -22,4 +23,8 @@ export function agentRunSnapshot(runId: string): Promise<AgentRunSnapshot> {
 
 export async function agentRunCancel(runId: string): Promise<void> {
   await invoke("agent_run_cancel", { request: { runId } });
+}
+
+export async function toolCallDecide(request: ToolCallDecideRequest): Promise<void> {
+  await invoke("tool_call_decide", { request });
 }

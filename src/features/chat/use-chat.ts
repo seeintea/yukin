@@ -1,13 +1,14 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useReducer, useRef } from "react";
 
-import { agentRunCancel, agentRunSnapshot, agentRunStart } from "#/api/agent-run";
+import { agentRunCancel, agentRunSnapshot, agentRunStart, toolCallDecide } from "#/api/agent-run";
 import type { ChatInputValue } from "#/components/chat-input";
 import type {
   ActiveToolCall,
   AgentRunEvent,
   AgentRunStartResponse,
   RunStatus,
+  ToolCallDecision,
 } from "#/protocol/agent-run";
 import type { ConversationMessage, ConversationSnapshot } from "#/protocol/conversation";
 import { toast } from "#/shadcn/toast";
@@ -27,7 +28,7 @@ interface ActiveRunState {
 type ActiveRunAction =
   | { type: "started"; runId: string }
   | { type: "event"; event: AgentRunEvent }
-  | { type: "snapshot"; runId: string; status: RunStatus };
+  | { type: "snapshot"; runId: string; status: RunStatus; toolCalls: ActiveToolCall[] };
 
 const initialActiveRun: ActiveRunState = {
   runId: null,
@@ -45,7 +46,7 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
     return { runId: action.runId, status: "pending", phase: null, lastSequence: 0, toolCalls: [] };
   }
   if (action.type === "snapshot") {
-    return { ...state, runId: action.runId, status: action.status };
+    return { ...state, runId: action.runId, status: action.status, toolCalls: action.toolCalls };
   }
   if (state.runId === action.event.runId && action.event.sequence <= state.lastSequence) {
     return state;
@@ -64,22 +65,56 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
       break;
     case "tool_call_requested":
       {
-        const { toolCallId, name, arguments: toolArguments } = action.event.data;
+        status = "running";
+        const {
+          toolCallId,
+          name,
+          arguments: toolArguments,
+          argumentsDigest,
+          riskLevel,
+          approvalPolicy,
+        } = action.event.data;
+        const timestamp = action.event.timestamp;
         toolCalls = [
           ...toolCalls.filter((toolCall) => toolCall.id !== toolCallId),
           {
             id: toolCallId,
             name,
+            runId: action.event.runId,
             arguments: toolArguments,
+            argumentsDigest,
             status: "requested",
             result: null,
+            riskLevel,
+            approvalPolicy,
+            errorCode: null,
             errorMessage: null,
+            approvalExpiresAt: null,
+            createdAt: timestamp,
+            completedAt: null,
           },
         ];
       }
       break;
+    case "tool_approval_required":
+      {
+        const { toolCallId, argumentsDigest, expiresAt } = action.event.data;
+        status = "waiting_approval";
+        toolCalls = toolCalls.map((toolCall) =>
+          toolCall.id === toolCallId
+            ? {
+                ...toolCall,
+                status: "waiting_approval",
+                argumentsDigest,
+                approvalExpiresAt: expiresAt,
+              }
+            : toolCall,
+        );
+      }
+      break;
     case "tool_call_started":
       {
+        status = "running";
         const { toolCallId } = action.event.data;
         toolCalls = toolCalls.map((toolCall) =>
           toolCall.id === toolCallId ? { ...toolCall, status: "running" } : toolCall,
@@ -88,6 +123,7 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
       break;
     case "tool_call_completed":
       {
+        status = "running";
         const { toolCallId, result } = action.event.data;
         toolCalls = toolCalls.map((toolCall) =>
           toolCall.id === toolCallId ? { ...toolCall, status: "completed", result } : toolCall,
@@ -96,9 +132,20 @@ function activeRunReducer(state: ActiveRunState, action: ActiveRunAction): Activ
       break;
     case "tool_call_failed":
       {
-        const { toolCallId, errorMessage } = action.event.data;
+        const { toolCallId, errorCode, errorMessage } = action.event.data;
         toolCalls = toolCalls.map((toolCall) =>
-          toolCall.id === toolCallId ? { ...toolCall, status: "failed", errorMessage } : toolCall,
+          toolCall.id === toolCallId
+            ? { ...toolCall, status: "failed", errorCode, errorMessage }
+            : toolCall,
+        );
+      }
+      break;
+    case "tool_call_rejected":
+      {
+        const { toolCallId } = action.event.data;
+        status = "running";
+        toolCalls = toolCalls.map((toolCall) =>
+          toolCall.id === toolCallId ? { ...toolCall, status: "rejected" } : toolCall,
         );
       }
       break;
@@ -222,7 +269,12 @@ export function useChat(conversationId: string) {
           }
         : conversation,
     );
-    dispatch({ type: "snapshot", runId: snapshot.run.id, status: snapshot.run.status });
+    dispatch({
+      type: "snapshot",
+      runId: snapshot.run.id,
+      status: snapshot.run.status,
+      toolCalls: snapshot.toolCalls,
+    });
   }, [queryClient, queryKey, snapshotQuery.data]);
 
   const finishRun = (event: AgentRunEvent) => {
@@ -343,6 +395,34 @@ export function useChat(conversationId: string) {
       });
     },
   });
+  const approvalMutation = useMutation({
+    mutationFn: async ({
+      toolCall,
+      decision,
+    }: {
+      toolCall: ActiveToolCall;
+      decision: ToolCallDecision;
+    }) => {
+      await toolCallDecide({
+        runId: toolCall.runId,
+        toolCallId: toolCall.id,
+        argumentsDigest: toolCall.argumentsDigest,
+        decision,
+      });
+      return toolCall.id;
+    },
+    onSuccess: (_, { toolCall }) => {
+      void queryClient.invalidateQueries({ queryKey: agentRunKeys.snapshot(toolCall.runId) });
+    },
+    onError: (error) => {
+      toast.add({
+        title: "工具审批失败",
+        description: getErrorMessage(error),
+        type: "error",
+        priority: "high",
+      });
+    },
+  });
   const snapshotStatus = snapshotQuery.data?.run.status;
   const isSending =
     sendMutation.isPending || isActiveStatus(activeRun.status) || isActiveStatus(snapshotStatus);
@@ -354,6 +434,9 @@ export function useChat(conversationId: string) {
     canCancel: activeRunId !== null,
     phase: activeRun.phase,
     toolCalls: activeRun.toolCalls,
+    decideToolCall: (toolCall: ActiveToolCall, decision: ToolCallDecision) =>
+      approvalMutation.mutate({ toolCall, decision }),
+    decidingToolCallId: approvalMutation.isPending ? approvalMutation.variables?.toolCall.id : null,
     isPending: conversationQuery.isPending || isSending,
     isSending,
     isCancelling: cancelMutation.isPending,

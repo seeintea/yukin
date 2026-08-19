@@ -62,6 +62,10 @@ pub enum RuntimeError {
     InvalidToolArguments { name: String, message: String },
     #[error("tool call timed out: {0}")]
     ToolTimeout(String),
+    #[error("tool approval expired: {0}")]
+    ApprovalExpired(String),
+    #[error("tool approval is missing or does not match arguments: {0}")]
+    InvalidToolApproval(String),
     #[error("tool output exceeded the size limit: {0}")]
     ToolOutputLimit(String),
     #[error("repeated tool call detected: {0}")]
@@ -78,6 +82,8 @@ impl RuntimeError {
             Self::ToolNotFound(_) => "tool_not_found",
             Self::InvalidToolArguments { .. } => "tool_invalid_arguments",
             Self::ToolTimeout(_) => "tool_timeout",
+            Self::ApprovalExpired(_) => "tool_approval_expired",
+            Self::InvalidToolApproval(_) => "tool_approval_invalid",
             Self::ToolOutputLimit(_) => "tool_output_limit",
             Self::RepeatedToolCall(_) => "tool_repeated_call",
             Self::ToolExecution { .. } => "tool_execution",

@@ -32,6 +32,22 @@ pub struct CancelRequest {
     pub run_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallDecideRequest {
+    pub run_id: String,
+    pub tool_call_id: String,
+    pub arguments_digest: String,
+    pub decision: ToolCallDecision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallDecision {
+    Allow,
+    Reject,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -67,6 +83,52 @@ pub struct Run {
 pub struct Snapshot {
     pub run: Run,
     pub assistant_message: Message,
+    pub tool_calls: Vec<ToolCallSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStatus {
+    Requested,
+    WaitingApproval,
+    Running,
+    Completed,
+    Failed,
+    Rejected,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolRiskLevel {
+    ReadOnly,
+    Write,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolApprovalPolicy {
+    Never,
+    Always,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallSnapshot {
+    pub id: String,
+    pub run_id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub arguments_digest: String,
+    pub result: Option<serde_json::Value>,
+    pub status: ToolCallStatus,
+    pub risk_level: ToolRiskLevel,
+    pub approval_policy: ToolApprovalPolicy,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub approval_expires_at: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -116,6 +178,14 @@ pub enum EventKind {
         tool_call_id: String,
         name: String,
         arguments: serde_json::Value,
+        arguments_digest: String,
+        risk_level: ToolRiskLevel,
+        approval_policy: ToolApprovalPolicy,
+    },
+    ToolApprovalRequired {
+        tool_call_id: String,
+        arguments_digest: String,
+        expires_at: String,
     },
     ToolCallStarted {
         tool_call_id: String,
@@ -129,6 +199,9 @@ pub enum EventKind {
         error_code: String,
         error_message: String,
     },
+    ToolCallRejected {
+        tool_call_id: String,
+    },
     RunCompleted {},
     RunFailed {
         error_code: String,
@@ -139,7 +212,7 @@ pub enum EventKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{Event, EventKind, Phase, StartRequest};
+    use super::{Event, EventKind, Phase, StartRequest, ToolCallDecideRequest, ToolCallDecision};
 
     #[test]
     fn deserializes_start_request() {
@@ -177,5 +250,21 @@ mod tests {
         assert_eq!(value["sequence"], 2);
         assert_eq!(value["event"], "phase_changed");
         assert_eq!(value["data"]["phase"], "thinking");
+    }
+
+    #[test]
+    fn deserializes_tool_call_decision_bound_to_arguments() {
+        let request: ToolCallDecideRequest = serde_json::from_value(serde_json::json!({
+            "runId": "run-1",
+            "toolCallId": "tool-1",
+            "argumentsDigest": "abc123",
+            "decision": "allow"
+        }))
+        .expect("valid tool decision");
+
+        assert_eq!(request.run_id, "run-1");
+        assert_eq!(request.tool_call_id, "tool-1");
+        assert_eq!(request.arguments_digest, "abc123");
+        assert_eq!(request.decision, ToolCallDecision::Allow);
     }
 }

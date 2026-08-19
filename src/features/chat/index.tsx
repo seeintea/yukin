@@ -4,6 +4,7 @@ import { ChatInput } from "#/components/chat-input";
 import { Markdown } from "#/components/markdown";
 import type { ActiveToolCall } from "#/protocol/agent-run";
 import type { Conversation } from "#/protocol/conversation";
+import { Button } from "#/shadcn/button";
 import { Card, CardContent, CardHeader, CardTitle } from "#/shadcn/card";
 import { SidebarInset, SidebarProvider } from "#/shadcn/sidebar";
 
@@ -49,6 +50,8 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
     canCancel,
     phase,
     toolCalls,
+    decideToolCall,
+    decidingToolCallId,
     isPending,
     isSending,
     isCancelling,
@@ -95,7 +98,13 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
               ),
             )}
             {toolCalls.map((toolCall) => (
-              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+              <ToolCallCard
+                key={toolCall.id}
+                toolCall={toolCall}
+                isDeciding={decidingToolCallId === toolCall.id}
+                onAllow={() => decideToolCall(toolCall, "allow")}
+                onReject={() => decideToolCall(toolCall, "reject")}
+              />
             ))}
             <div ref={bottomRef} />
           </div>
@@ -114,12 +123,25 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
   );
 }
 
-function ToolCallCard({ toolCall }: { toolCall: ActiveToolCall }) {
+function ToolCallCard({
+  toolCall,
+  isDeciding,
+  onAllow,
+  onReject,
+}: {
+  toolCall: ActiveToolCall;
+  isDeciding: boolean;
+  onAllow: () => void;
+  onReject: () => void;
+}) {
   const status = {
     requested: "等待执行",
+    waiting_approval: "等待批准",
     running: "执行中…",
     completed: "已完成",
     failed: "执行失败",
+    rejected: "已拒绝",
+    cancelled: "已取消",
   }[toolCall.status];
 
   return (
@@ -132,6 +154,16 @@ function ToolCallCard({ toolCall }: { toolCall: ActiveToolCall }) {
         <ToolCallValue label="参数" value={toolCall.arguments} />
         {toolCall.result !== null && <ToolCallValue label="结果" value={toolCall.result} />}
         {toolCall.errorMessage && <p className="text-destructive">{toolCall.errorMessage}</p>}
+        {toolCall.status === "waiting_approval" && (
+          <div className="flex justify-end gap-2 pt-2">
+            <Button size="sm" variant="outline" disabled={isDeciding} onClick={onReject}>
+              拒绝
+            </Button>
+            <Button size="sm" disabled={isDeciding} onClick={onAllow}>
+              {isDeciding ? "提交中…" : "允许"}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
