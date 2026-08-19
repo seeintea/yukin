@@ -22,3 +22,7 @@ export interface ConversationSnapshot {
   conversation: Conversation;
   messages: ConversationMessage[];
 }
+
+export interface FindRequest {
+  id: string;
+}

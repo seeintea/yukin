@@ -71,7 +71,7 @@ impl TryFrom<MessageRecord> for Message {
     }
 }
 
-pub async fn current(pool: &SqlitePool) -> AppResult<Snapshot> {
+pub async fn current(pool: &SqlitePool) -> AppResult<Conversation> {
     let record = sqlx::query_as::<_, ConversationRecord>(
         r#"
         SELECT id, title, created_at, updated_at
@@ -83,11 +83,25 @@ pub async fn current(pool: &SqlitePool) -> AppResult<Snapshot> {
     .fetch_optional(pool)
     .await?;
 
-    let conversation = match record {
+    Ok(match record {
         Some(record) => record.into(),
         None => create(pool).await?,
-    };
-    let messages = list_messages(pool, &conversation.id).await?;
+    })
+}
+
+pub async fn find(pool: &SqlitePool, id: &str) -> AppResult<Snapshot> {
+    let record = sqlx::query_as::<_, ConversationRecord>(
+        r#"
+        SELECT id, title, created_at, updated_at
+        FROM conversations
+        WHERE id = ?
+        "#,
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    let conversation = record.into();
+    let messages = list_messages(pool, id).await?;
 
     Ok(Snapshot {
         conversation,

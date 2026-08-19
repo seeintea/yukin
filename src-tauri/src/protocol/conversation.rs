@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::common::RecordMetadata;
 
@@ -41,4 +41,10 @@ pub enum MessageStatus {
 pub struct Snapshot {
     pub conversation: Conversation,
     pub messages: Vec<Message>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindRequest {
+    pub id: String,
 }
