@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { devtools } from '@tanstack/devtools-vite'
+import { devtools } from "@tanstack/devtools-vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -24,6 +24,7 @@ export default defineConfig(async () => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
+  envPrefix: ["VITE_", "TAURI_ENV_"],
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,

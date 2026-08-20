@@ -15,7 +15,9 @@ const providersQueryOptions = queryOptions({
   staleTime: Infinity,
 });
 
-function AppFrame() {
+const usesCustomWindowFrame = import.meta.env.TAURI_ENV_PLATFORM === "windows";
+
+function WindowsAppFrame() {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -55,6 +57,20 @@ function AppFrame() {
       <div className="min-h-0 flex-1">
         <Outlet />
       </div>
+      <Toaster />
+      <TanStackDevtools />
+    </div>
+  );
+}
+
+function AppFrame() {
+  if (usesCustomWindowFrame) {
+    return <WindowsAppFrame />;
+  }
+
+  return (
+    <div className="h-full bg-background">
+      <Outlet />
       <Toaster />
       <TanStackDevtools />
     </div>
