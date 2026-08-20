@@ -18,7 +18,7 @@ import {
 
 export function Settings() {
   return (
-    <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+    <SidebarProvider className="h-full min-h-0 overflow-hidden">
       <Sidebar collapsible="none">
         <SidebarHeader>
           <SidebarMenu>
@@ -56,7 +56,7 @@ export function Settings() {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+      <SidebarInset className="h-full min-w-0 overflow-hidden">
         <Outlet />
       </SidebarInset>
     </SidebarProvider>

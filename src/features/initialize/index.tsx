@@ -47,29 +47,31 @@ export function Initialize() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <CardTitle>配置模型供应商</CardTitle>
-          <CardDescription>选择供应商并填写 API Key，完成初始模型接入。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ModelProviderForm id={formId} onSubmit={handleSubmit} ref={formRef} />
-        </CardContent>
-        <CardFooter className="justify-end gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={createMutation.isPending}
-            onClick={() => formRef.current?.reset()}
-          >
-            重置
-          </Button>
-          <Button type="submit" form={formId} disabled={createMutation.isPending}>
-            {createMutation.isPending ? "正在创建" : "创建供应商"}
-          </Button>
-        </CardFooter>
-      </Card>
+    <div className="h-full overflow-y-auto">
+      <div className="flex min-h-full items-center justify-center p-6">
+        <Card className="w-full max-w-lg">
+          <CardHeader>
+            <CardTitle>配置模型供应商</CardTitle>
+            <CardDescription>选择供应商并填写 API Key，完成初始模型接入。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ModelProviderForm id={formId} onSubmit={handleSubmit} ref={formRef} />
+          </CardContent>
+          <CardFooter className="justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={createMutation.isPending}
+              onClick={() => formRef.current?.reset()}
+            >
+              重置
+            </Button>
+            <Button type="submit" form={formId} disabled={createMutation.isPending}>
+              {createMutation.isPending ? "正在创建" : "创建供应商"}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   );
 }

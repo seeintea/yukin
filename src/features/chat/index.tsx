@@ -35,7 +35,7 @@ export function Chat({
   deletingConversationId,
 }: ChatProps) {
   return (
-    <SidebarProvider className="h-svh min-h-0 overflow-hidden">
+    <SidebarProvider className="h-full min-h-0 overflow-hidden">
       <ConversationSidebar
         conversations={conversations}
         selectedConversationId={conversationId}
@@ -47,7 +47,7 @@ export function Chat({
         renamingConversationId={renamingConversationId}
         deletingConversationId={deletingConversationId}
       />
-      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+      <SidebarInset className="h-full min-w-0 overflow-hidden">
         <ChatConversation key={conversationId} conversationId={conversationId} />
       </SidebarInset>
     </SidebarProvider>
