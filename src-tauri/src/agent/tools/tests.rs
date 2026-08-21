@@ -74,6 +74,22 @@ fn rejects_a_file_reference_that_was_not_attached_to_the_run() {
     );
 }
 
+#[test]
+fn rejects_a_directory_reference_that_was_not_attached_to_the_run() {
+    let result = tauri::async_runtime::block_on(ToolRegistry::built_in(PathBuf::new()).execute(
+        "list_selected_directory",
+        &json!({ "referenceId": "not-authorized" }),
+        ExecutionAuthorization::NotRequired,
+    ));
+
+    assert_eq!(
+        result,
+        Err(RuntimeError::File(
+            crate::files::FileError::ReferenceInvalid
+        ))
+    );
+}
+
 #[tokio::test]
 async fn reads_an_authorized_file_without_exposing_content_in_the_summary() {
     let path =
@@ -84,7 +100,7 @@ async fn reads_an_authorized_file_without_exposing_content_in_the_summary() {
     let files = SelectedFiles::default();
     let reference = files.register(path.clone()).await.expect("register file");
     let file = files.take(&reference).expect("take reference");
-    let registry = ToolRegistry::with_authorized_files(PathBuf::new(), vec![file]);
+    let registry = ToolRegistry::with_authorizations(PathBuf::new(), vec![file], Vec::new());
     let result = registry
         .execute(
             "read_selected_text_file",

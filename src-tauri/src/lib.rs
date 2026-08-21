@@ -70,6 +70,8 @@ pub fn run() {
             commands::diagnostics::diagnostics_frontend_error_report,
             commands::file::file_reference_select,
             commands::file::file_reference_release,
+            commands::file::directory_reference_select,
+            commands::file::directory_reference_release,
             commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,

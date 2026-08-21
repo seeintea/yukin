@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import {
   ArrowUpIcon,
   FileTextIcon,
+  FolderIcon,
   LoaderCircleIcon,
   PaperclipIcon,
   SquareIcon,
@@ -10,11 +11,16 @@ import {
 import type { FormEvent, KeyboardEvent } from "react";
 import { useState } from "react";
 
-import { fileReferenceRelease, fileReferenceSelect } from "#/api/file";
+import {
+  directoryReferenceRelease,
+  directoryReferenceSelect,
+  fileReferenceRelease,
+  fileReferenceSelect,
+} from "#/api/file";
 import { ModelSelector } from "#/components/model-selector";
 import type { ModelSelection } from "#/components/model-selector";
 import { SkillSelector } from "#/components/skill-selector";
-import type { FileReference } from "#/protocol/file";
+import type { DirectoryReference, FileReference } from "#/protocol/file";
 import { Button } from "#/shadcn/button";
 import { Textarea } from "#/shadcn/textarea";
 import { showErrorToast } from "#/utils/toast";
@@ -24,6 +30,7 @@ export interface ChatInputValue {
   selection: ModelSelection;
   skillId: string | null;
   attachment: FileReference | null;
+  directoryScope: DirectoryReference | null;
 }
 
 interface ChatInputProps {
@@ -37,6 +44,7 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [skillId, setSkillId] = useState<string | null>(null);
   const [attachment, setAttachment] = useState<FileReference | null>(null);
+  const [directoryScope, setDirectoryScope] = useState<DirectoryReference | null>(null);
   const selectFileMutation = useMutation({
     mutationFn: fileReferenceSelect,
     onSuccess: (file) => {
@@ -50,6 +58,19 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
     mutationFn: fileReferenceRelease,
     onError: (error) => showErrorToast("移除文件失败", error),
   });
+  const selectDirectoryMutation = useMutation({
+    mutationFn: directoryReferenceSelect,
+    onSuccess: (directory) => {
+      if (directory) {
+        setDirectoryScope(directory);
+      }
+    },
+    onError: (error) => showErrorToast("选择目录失败", error),
+  });
+  const releaseDirectoryMutation = useMutation({
+    mutationFn: directoryReferenceRelease,
+    onError: (error) => showErrorToast("移除目录失败", error),
+  });
 
   const submit = () => {
     const normalizedContent = content.trim();
@@ -57,9 +78,10 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
       return;
     }
 
-    onSubmit({ content: normalizedContent, selection, skillId, attachment });
+    onSubmit({ content: normalizedContent, selection, skillId, attachment, directoryScope });
     setContent("");
     setAttachment(null);
+    setDirectoryScope(null);
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -107,6 +129,27 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
           </Button>
         </div>
       )}
+      {directoryScope && (
+        <div className="mx-1 mb-1 flex w-fit max-w-full items-center gap-2 rounded-lg border bg-muted/50 px-2.5 py-1.5 text-xs">
+          <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{directoryScope.name}</span>
+          <span className="shrink-0 text-muted-foreground">目录范围</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`移除目录 ${directoryScope.name}`}
+            disabled={isPending || releaseDirectoryMutation.isPending}
+            onClick={() => {
+              const referenceId = directoryScope.referenceId;
+              setDirectoryScope(null);
+              releaseDirectoryMutation.mutate(referenceId);
+            }}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      )}
       <div className="flex items-end justify-between gap-2 pt-2">
         <div className="flex flex-wrap items-center gap-1">
           {!attachment && (
@@ -123,6 +166,23 @@ export function ChatInput({ isPending, onSubmit, onCancel }: ChatInputProps) {
                 <LoaderCircleIcon className="animate-spin" />
               ) : (
                 <PaperclipIcon />
+              )}
+            </Button>
+          )}
+          {!directoryScope && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="选择目录范围"
+              title="选择 Agent 可查看的目录"
+              disabled={isPending || selectDirectoryMutation.isPending}
+              onClick={() => selectDirectoryMutation.mutate()}
+            >
+              {selectDirectoryMutation.isPending ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <FolderIcon />
               )}
             </Button>
           )}

@@ -195,6 +195,7 @@ function appendRunMessages(
   response: AgentRunStartResponse,
   content: string,
   attachments: ConversationMessage["attachments"],
+  directoryScopes: ConversationMessage["directoryScopes"],
 ) {
   if (!snapshot || snapshot.messages.some((message) => message.id === response.userMessageId)) {
     return snapshot;
@@ -209,6 +210,7 @@ function appendRunMessages(
       role: "user",
       content,
       attachments,
+      directoryScopes,
       status: "completed",
       sequence: nextSequence,
       createdAt: timestamp,
@@ -220,6 +222,7 @@ function appendRunMessages(
       role: "assistant",
       content: "",
       attachments: [],
+      directoryScopes: [],
       status: "streaming",
       sequence: nextSequence + 1,
       createdAt: timestamp,
@@ -302,10 +305,17 @@ export function useChat(conversationId: string) {
   };
 
   const sendMutation = useMutation({
-    mutationFn: async ({ content, selection, skillId, attachment }: ChatInputValue) => {
+    mutationFn: async ({
+      content,
+      selection,
+      skillId,
+      attachment,
+      directoryScope,
+    }: ChatInputValue) => {
       const messageAttachments = attachment
         ? [{ name: attachment.name, size: attachment.size }]
         : [];
+      const messageDirectoryScopes = directoryScope ? [{ name: directoryScope.name }] : [];
       const handleEvent = (event: AgentRunEvent) => {
         const lastSequence = eventSequences.current.get(event.runId) ?? 0;
         if (event.sequence <= lastSequence) {
@@ -325,6 +335,7 @@ export function useChat(conversationId: string) {
               },
               content,
               messageAttachments,
+              messageDirectoryScopes,
             ),
           );
         } else if (event.event === "output_text_delta") {
@@ -355,12 +366,13 @@ export function useChat(conversationId: string) {
           content,
           skillIds: skillId ? [skillId] : [],
           attachments: attachment ? [attachment] : [],
+          directoryScopes: directoryScope ? [directoryScope] : [],
         },
         handleEvent,
       );
       dispatch({ type: "started", runId: response.runId });
       queryClient.setQueryData<ConversationSnapshot>(queryKey, (snapshot) =>
-        appendRunMessages(snapshot, response, content, messageAttachments),
+        appendRunMessages(snapshot, response, content, messageAttachments, messageDirectoryScopes),
       );
       return response;
     },

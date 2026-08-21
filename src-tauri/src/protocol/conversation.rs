@@ -18,9 +18,16 @@ pub struct Message {
     pub role: MessageRole,
     pub content: String,
     pub attachments: Vec<Attachment>,
+    pub directory_scopes: Vec<DirectoryScope>,
     pub status: MessageStatus,
     pub sequence: i64,
     pub metadata: RecordMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryScope {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -21,9 +21,14 @@ pub async fn agent_run_start(
     events: Channel<Event>,
 ) -> AppResult<StartResponse> {
     let conversation_id = request.conversation_id.clone();
-    let prepared = agent_run::prepare(state.db(), state.selected_files(), request)
-        .await
-        .log_error("agent_run_start")?;
+    let prepared = agent_run::prepare(
+        state.db(),
+        state.selected_files(),
+        state.selected_directories(),
+        request,
+    )
+    .await
+    .log_error("agent_run_start")?;
     let response = prepared.response.clone();
     let cancellation = state.active_runs().register(response.run_id.clone());
     let active_runs = state.active_runs().clone();

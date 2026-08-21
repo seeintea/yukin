@@ -1,5 +1,5 @@
 import type { ConversationMessage } from "./conversation";
-import type { FileReference } from "./file";
+import type { DirectoryReference, FileReference } from "./file";
 import type { ReasoningEffort } from "./model-provider";
 
 export interface AgentRunStartRequest {
@@ -10,6 +10,7 @@ export interface AgentRunStartRequest {
   content: string;
   skillIds: string[];
   attachments: FileReference[];
+  directoryScopes: DirectoryReference[];
 }
 
 export interface AgentRunStartResponse {

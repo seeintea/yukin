@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use crate::files::AuthorizedFile;
+use crate::files::{AuthorizedDirectory, AuthorizedFile};
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
 use super::{RuntimeError, ToolDefinition};
@@ -65,6 +65,7 @@ impl From<ApprovalPolicy> for ToolApprovalPolicy {
 pub(crate) struct ToolRegistry {
     data_dir: PathBuf,
     authorized_files: HashMap<String, AuthorizedFile>,
+    authorized_directories: HashMap<String, AuthorizedDirectory>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,18 +79,24 @@ impl ToolRegistry {
         Self {
             data_dir,
             authorized_files: HashMap::new(),
+            authorized_directories: HashMap::new(),
         }
     }
 
-    pub(crate) fn with_authorized_files(
+    pub(crate) fn with_authorizations(
         data_dir: PathBuf,
         authorized_files: Vec<AuthorizedFile>,
+        authorized_directories: Vec<AuthorizedDirectory>,
     ) -> Self {
         Self {
             data_dir,
             authorized_files: authorized_files
                 .into_iter()
                 .map(|file| (file.reference().reference_id.clone(), file))
+                .collect(),
+            authorized_directories: authorized_directories
+                .into_iter()
+                .map(|directory| (directory.reference().reference_id.clone(), directory))
                 .collect(),
         }
     }
@@ -107,6 +114,21 @@ impl ToolRegistry {
                             "description": "UTC offset in ±HH:MM format, for example +08:00. Defaults to +00:00."
                         }
                     },
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
+                name: "list_selected_directory".into(),
+                description: "List up to 100 direct children of a directory explicitly selected by the user. This does not recurse or expose local paths.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the selected directory."
+                        }
+                    },
+                    "required": ["referenceId"],
                     "additionalProperties": false
                 }),
             },
@@ -163,6 +185,7 @@ impl ToolRegistry {
             "current_time" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "save_text_note" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "read_selected_text_file" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
+            "list_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -189,6 +212,7 @@ impl ToolRegistry {
             "current_time" => current_time(arguments),
             "save_text_note" => save_text_note(&self.data_dir, arguments).await,
             "read_selected_text_file" => self.read_selected_text_file(arguments).await,
+            "list_selected_directory" => self.list_selected_directory(arguments).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -221,6 +245,23 @@ impl ToolRegistry {
                         }
                     })?;
                 if self.authorized_files.contains_key(&arguments.reference_id) {
+                    Ok(())
+                } else {
+                    Err(crate::files::FileError::ReferenceInvalid.into())
+                }
+            }
+            "list_selected_directory" => {
+                let arguments: DirectoryReferenceArguments =
+                    serde_json::from_value(arguments.clone()).map_err(|error| {
+                        RuntimeError::InvalidToolArguments {
+                            name: name.into(),
+                            message: error.to_string(),
+                        }
+                    })?;
+                if self
+                    .authorized_directories
+                    .contains_key(&arguments.reference_id)
+                {
                     Ok(())
                 } else {
                     Err(crate::files::FileError::ReferenceInvalid.into())
@@ -260,11 +301,46 @@ impl ToolRegistry {
             "read": true
         }))
     }
+
+    async fn list_selected_directory(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments: DirectoryReferenceArguments = serde_json::from_value(arguments.clone())
+            .map_err(|error| RuntimeError::InvalidToolArguments {
+                name: "list_selected_directory".into(),
+                message: error.to_string(),
+            })?;
+        let directory = self
+            .authorized_directories
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let listing = directory.list().await?;
+        let entries = listing
+            .entries
+            .into_iter()
+            .map(|entry| {
+                json!({
+                    "name": entry.name,
+                    "kind": entry.kind,
+                    "size": entry.size
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "entries": entries,
+            "truncated": listing.truncated
+        }))
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReadSelectedTextFileArguments {
+    reference_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectoryReferenceArguments {
     reference_id: String,
 }
 

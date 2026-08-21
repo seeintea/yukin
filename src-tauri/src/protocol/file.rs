@@ -13,3 +13,10 @@ pub struct Reference {
 pub struct ReleaseRequest {
     pub reference_id: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryReference {
+    pub reference_id: String,
+    pub name: String,
+}

@@ -15,10 +15,10 @@ use crate::{
         CompletionRequest, Message, ModelError, Role, RuntimeError, ThinkingMode, TokenUsage,
         ToolCall, ToolCallFunction, ToolCallType,
     },
-    files::{AuthorizedFile, SelectedFiles},
+    files::{AuthorizedDirectory, AuthorizedFile, SelectedDirectories, SelectedFiles},
     protocol::{
         agent_run::{Event, EventKind, Phase, StartRequest, StartResponse, ToolCallDecision},
-        conversation::Attachment,
+        conversation::{Attachment, DirectoryScope},
         model_provider::ReasoningEffort,
     },
     security::keychain,
@@ -46,11 +46,13 @@ pub(crate) struct PreparedRun {
     messages: Vec<Message>,
     allowed_tools: HashSet<String>,
     authorized_files: Vec<AuthorizedFile>,
+    authorized_directories: Vec<AuthorizedDirectory>,
 }
 
 pub(crate) async fn prepare(
     pool: &SqlitePool,
     selected_files: &SelectedFiles,
+    selected_directories: &SelectedDirectories,
     request: StartRequest,
 ) -> AppResult<PreparedRun> {
     if request.attachments.len() > 1 {
@@ -58,16 +60,27 @@ pub(crate) async fn prepare(
             "only one text file can be attached to a message".into(),
         ));
     }
+    if request.directory_scopes.len() > 1 {
+        return Err(AppError::Validation(
+            "only one directory can be authorized for a message".into(),
+        ));
+    }
     let run_id = Uuid::now_v7().to_string();
     let user_message_id = Uuid::now_v7().to_string();
     let assistant_message_id = Uuid::now_v7().to_string();
     let mut available_tools = ToolRegistry::built_in(PathBuf::new()).names();
     available_tools.remove("read_selected_text_file");
+    available_tools.remove("list_selected_directory");
     let mut resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
     let authorized_files = request
         .attachments
         .iter()
         .map(|reference| selected_files.take(reference))
+        .collect::<Result<Vec<_>, _>>()?;
+    let authorized_directories = request
+        .directory_scopes
+        .iter()
+        .map(|reference| selected_directories.take(reference))
         .collect::<Result<Vec<_>, _>>()?;
     if !authorized_files.is_empty() {
         resolved_skills
@@ -81,11 +94,29 @@ pub(crate) async fn prepare(
             ));
         }
     }
+    if !authorized_directories.is_empty() {
+        resolved_skills
+            .allowed_tools
+            .insert("list_selected_directory".into());
+        for directory in &authorized_directories {
+            let reference = directory.reference();
+            resolved_skills.instructions.push_str(&format!(
+                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect only its direct children. Never expose or invent a local path.",
+                reference.name, reference.reference_id
+            ));
+        }
+    }
     let attachments = authorized_files
         .iter()
         .map(|file| Attachment {
             name: file.reference().name.clone(),
             size: file.reference().size,
+        })
+        .collect();
+    let directory_scopes = authorized_directories
+        .iter()
+        .map(|directory| DirectoryScope {
+            name: directory.reference().name.clone(),
         })
         .collect();
     let history = model_response::start(
@@ -103,6 +134,7 @@ pub(crate) async fn prepare(
             content: request.content.clone(),
             skills: resolved_skills.selected,
             attachments,
+            directory_scopes,
         },
     )
     .await?;
@@ -135,6 +167,7 @@ pub(crate) async fn prepare(
         messages,
         allowed_tools: resolved_skills.allowed_tools,
         authorized_files,
+        authorized_directories,
     })
 }
 
@@ -254,8 +287,11 @@ async fn execute_stream(
         Ok(None) => return failed("", ModelError::MissingCredential.into()),
         Err(error) => return failed("", error),
     };
-    let registry =
-        ToolRegistry::with_authorized_files(tool_data_dir, prepared.authorized_files.clone());
+    let registry = ToolRegistry::with_authorizations(
+        tool_data_dir,
+        prepared.authorized_files.clone(),
+        prepared.authorized_directories.clone(),
+    );
     let mut messages = prepared.messages.clone();
     let mut content = String::new();
     let mut usage = TokenUsage {

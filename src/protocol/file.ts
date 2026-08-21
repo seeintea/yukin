@@ -3,3 +3,8 @@ export interface FileReference {
   name: string;
   size: number;
 }
+
+export interface DirectoryReference {
+  referenceId: string;
+  name: string;
+}

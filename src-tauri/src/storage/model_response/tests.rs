@@ -2,7 +2,10 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
 use crate::{
     agent::TokenUsage,
-    protocol::{agent_run::RunStatus, conversation::Attachment},
+    protocol::{
+        agent_run::RunStatus,
+        conversation::{Attachment, DirectoryScope},
+    },
     storage::conversation,
     AppError,
 };
@@ -53,6 +56,7 @@ fn start_params(run_id: &str) -> StartParams {
         content: "第一个问题".into(),
         skills: Vec::new(),
         attachments: Vec::new(),
+        directory_scopes: Vec::new(),
     }
 }
 
@@ -120,6 +124,9 @@ async fn persists_only_attachment_metadata_with_the_user_message() {
         name: "notes.txt".into(),
         size: 42,
     }];
+    params.directory_scopes = vec![DirectoryScope {
+        name: "project".into(),
+    }];
 
     start(&pool, params)
         .await
@@ -131,7 +138,9 @@ async fn persists_only_attachment_metadata_with_the_user_message() {
     assert_eq!(messages[0].attachments.len(), 1);
     assert_eq!(messages[0].attachments[0].name, "notes.txt");
     assert_eq!(messages[0].attachments[0].size, 42);
+    assert_eq!(messages[0].directory_scopes[0].name, "project");
     assert!(messages[1].attachments.is_empty());
+    assert!(messages[1].directory_scopes.is_empty());
 }
 
 #[tokio::test]

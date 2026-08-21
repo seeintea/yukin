@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use super::{conversation::Message, file::Reference, model_provider::ReasoningEffort};
+use super::{
+    conversation::Message,
+    file::{DirectoryReference, Reference},
+    model_provider::ReasoningEffort,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +18,8 @@ pub struct StartRequest {
     pub skill_ids: Vec<String>,
     #[serde(default)]
     pub attachments: Vec<Reference>,
+    #[serde(default)]
+    pub directory_scopes: Vec<DirectoryReference>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -258,6 +264,7 @@ mod tests {
                 "name": "notes.txt",
                 "size": 42
             }]
+            ,"directoryScopes": []
         }))
         .expect("valid run start request");
 

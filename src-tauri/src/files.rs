@@ -7,9 +7,10 @@ use std::{
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::protocol::file::Reference;
+use crate::protocol::file::{DirectoryReference, Reference};
 
 pub(crate) const MAX_SELECTED_FILE_BYTES: u64 = 16 * 1024;
+pub(crate) const MAX_DIRECTORY_ENTRIES: usize = 100;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizedFile {
@@ -17,6 +18,61 @@ pub(crate) struct AuthorizedFile {
     selected_path: PathBuf,
     canonical_path: PathBuf,
     content_digest: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizedDirectory {
+    reference: DirectoryReference,
+    selected_path: PathBuf,
+    canonical_path: PathBuf,
+}
+
+impl AuthorizedDirectory {
+    pub(crate) fn reference(&self) -> &DirectoryReference {
+        &self.reference
+    }
+
+    pub(crate) async fn list(&self) -> Result<DirectoryListing, FileError> {
+        validate_directory_path(&self.selected_path).await?;
+        let canonical_path = tokio::fs::canonicalize(&self.selected_path).await?;
+        if canonical_path != self.canonical_path {
+            return Err(FileError::Changed);
+        }
+        let mut reader = tokio::fs::read_dir(&canonical_path).await?;
+        let mut entries = Vec::new();
+        let mut truncated = false;
+        while let Some(entry) = reader.next_entry().await? {
+            if entries.len() == MAX_DIRECTORY_ENTRIES {
+                truncated = true;
+                break;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let metadata = tokio::fs::symlink_metadata(entry.path()).await?;
+            let (kind, size) = if metadata.file_type().is_symlink() {
+                ("symlink", None)
+            } else if metadata.is_dir() {
+                ("directory", None)
+            } else if metadata.is_file() {
+                ("file", Some(metadata.len()))
+            } else {
+                ("other", None)
+            };
+            entries.push(DirectoryEntry { name, kind, size });
+        }
+        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(DirectoryListing { entries, truncated })
+    }
+}
+
+pub(crate) struct DirectoryListing {
+    pub(crate) entries: Vec<DirectoryEntry>,
+    pub(crate) truncated: bool,
+}
+
+pub(crate) struct DirectoryEntry {
+    pub(crate) name: String,
+    pub(crate) kind: &'static str,
+    pub(crate) size: Option<u64>,
 }
 
 impl AuthorizedFile {
@@ -36,6 +92,66 @@ impl AuthorizedFile {
             return Err(FileError::Changed);
         }
         decode_text(bytes)
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct SelectedDirectories {
+    directories: Arc<Mutex<HashMap<String, AuthorizedDirectory>>>,
+}
+
+impl SelectedDirectories {
+    pub(crate) async fn register(&self, path: PathBuf) -> Result<DirectoryReference, FileError> {
+        validate_directory_path(&path).await?;
+        let canonical_path = tokio::fs::canonicalize(&path).await?;
+        if canonical_path.parent().is_none() {
+            return Err(FileError::DirectoryScopeTooBroad);
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .ok_or(FileError::InvalidName)?
+            .to_owned();
+        let reference = DirectoryReference {
+            reference_id: Uuid::now_v7().to_string(),
+            name,
+        };
+        let directory = AuthorizedDirectory {
+            reference: reference.clone(),
+            selected_path: path,
+            canonical_path,
+        };
+        let mut directories = self
+            .directories
+            .lock()
+            .expect("selected directory registry lock");
+        directories.clear();
+        directories.insert(reference.reference_id.clone(), directory);
+        Ok(reference)
+    }
+
+    pub(crate) fn take(
+        &self,
+        reference: &DirectoryReference,
+    ) -> Result<AuthorizedDirectory, FileError> {
+        let directory = self
+            .directories
+            .lock()
+            .expect("selected directory registry lock")
+            .remove(&reference.reference_id)
+            .ok_or(FileError::ReferenceInvalid)?;
+        if directory.reference != *reference {
+            return Err(FileError::ReferenceInvalid);
+        }
+        Ok(directory)
+    }
+
+    pub(crate) fn release(&self, reference_id: &str) {
+        self.directories
+            .lock()
+            .expect("selected directory registry lock")
+            .remove(reference_id);
     }
 }
 
@@ -107,6 +223,17 @@ async fn validate_selected_path(path: &Path) -> Result<(), FileError> {
     Ok(())
 }
 
+async fn validate_directory_path(path: &Path) -> Result<(), FileError> {
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    if metadata.file_type().is_symlink() {
+        return Err(FileError::Symlink);
+    }
+    if !metadata.is_dir() {
+        return Err(FileError::NotDirectory);
+    }
+    Ok(())
+}
+
 async fn read_limited(path: &Path) -> Result<Vec<u8>, FileError> {
     let bytes = tokio::fs::read(path).await?;
     if bytes.len() as u64 > MAX_SELECTED_FILE_BYTES {
@@ -138,6 +265,10 @@ pub enum FileError {
     InvalidName,
     #[error("selected path must be a regular file")]
     NotRegularFile,
+    #[error("selected path must be a directory")]
+    NotDirectory,
+    #[error("filesystem roots cannot be authorized as directory scopes")]
+    DirectoryScopeTooBroad,
     #[error("symbolic links are not supported")]
     Symlink,
     #[error("selected file exceeds the 16 KiB size limit")]
@@ -158,6 +289,8 @@ impl FileError {
             Self::ReferenceInvalid => "file_reference_invalid",
             Self::InvalidName => "file_name_invalid",
             Self::NotRegularFile => "file_not_regular",
+            Self::NotDirectory => "directory_not_found",
+            Self::DirectoryScopeTooBroad => "directory_scope_too_broad",
             Self::Symlink => "file_symlink_unsupported",
             Self::TooLarge => "file_too_large",
             Self::InvalidEncoding => "file_encoding_invalid",
@@ -176,7 +309,10 @@ impl From<std::io::Error> for FileError {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileError, SelectedFiles, MAX_SELECTED_FILE_BYTES};
+    use super::{
+        FileError, SelectedDirectories, SelectedFiles, MAX_DIRECTORY_ENTRIES,
+        MAX_SELECTED_FILE_BYTES,
+    };
 
     fn test_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("yukin-file-test-{}-{name}", uuid::Uuid::now_v7()))
@@ -228,5 +364,42 @@ mod tests {
         tokio::fs::remove_file(invalid)
             .await
             .expect("remove invalid file");
+    }
+
+    #[tokio::test]
+    async fn lists_only_direct_children_with_a_result_limit() {
+        let path = test_path("directory");
+        tokio::fs::create_dir(&path)
+            .await
+            .expect("create directory");
+        tokio::fs::create_dir(path.join("nested"))
+            .await
+            .expect("create nested directory");
+        tokio::fs::write(path.join("nested/hidden.txt"), "hidden")
+            .await
+            .expect("write nested file");
+        for index in 0..MAX_DIRECTORY_ENTRIES {
+            tokio::fs::write(path.join(format!("file-{index:03}.txt")), "text")
+                .await
+                .expect("write direct file");
+        }
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+
+        let listing = directory.list().await.expect("list directory");
+        assert_eq!(listing.entries.len(), MAX_DIRECTORY_ENTRIES);
+        assert!(listing.truncated);
+        assert!(!listing
+            .entries
+            .iter()
+            .any(|entry| entry.name == "hidden.txt"));
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
     }
 }

@@ -48,6 +48,7 @@ async fn setup(run_id: &str) -> SqlitePool {
             content: "save a note".into(),
             skills: Vec::new(),
             attachments: Vec::new(),
+            directory_scopes: Vec::new(),
         },
     )
     .await

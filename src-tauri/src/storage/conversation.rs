@@ -6,7 +6,9 @@ use uuid::Uuid;
 use crate::{
     protocol::{
         common::RecordMetadata,
-        conversation::{Attachment, Conversation, Message, MessageRole, MessageStatus, Snapshot},
+        conversation::{
+            Attachment, Conversation, DirectoryScope, Message, MessageRole, MessageStatus, Snapshot,
+        },
     },
     AppError, AppResult,
 };
@@ -38,6 +40,12 @@ struct AttachmentRecord {
     size: i64,
 }
 
+#[derive(FromRow)]
+struct DirectoryScopeRecord {
+    message_id: String,
+    name: String,
+}
+
 impl From<ConversationRecord> for Conversation {
     fn from(record: ConversationRecord) -> Self {
         Self {
@@ -64,6 +72,7 @@ impl TryFrom<MessageRecord> for Message {
             role,
             content: record.content,
             attachments: Vec::new(),
+            directory_scopes: Vec::new(),
             status,
             sequence: record.sequence,
             metadata: RecordMetadata {
@@ -237,12 +246,32 @@ pub async fn list_messages(pool: &SqlitePool, conversation_id: &str) -> AppResul
                 size: record.size as u64,
             });
     }
+    let scope_records = sqlx::query_as::<_, DirectoryScopeRecord>(
+        r#"
+        SELECT scope.message_id, scope.name
+        FROM message_directory_scopes scope
+        INNER JOIN messages message ON message.id = scope.message_id
+        WHERE message.conversation_id = ?
+        ORDER BY scope.name
+        "#,
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await?;
+    let mut directory_scopes = HashMap::<String, Vec<DirectoryScope>>::new();
+    for record in scope_records {
+        directory_scopes
+            .entry(record.message_id)
+            .or_default()
+            .push(DirectoryScope { name: record.name });
+    }
 
     records
         .into_iter()
         .map(|record| {
             let mut message: Message = record.try_into()?;
             message.attachments = attachments.remove(&message.id).unwrap_or_default();
+            message.directory_scopes = directory_scopes.remove(&message.id).unwrap_or_default();
             Ok(message)
         })
         .collect()

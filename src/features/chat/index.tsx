@@ -1,4 +1,4 @@
-import { FileTextIcon } from "lucide-react";
+import { FileTextIcon, FolderIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { ChatInput } from "#/components/chat-input";
@@ -100,6 +100,16 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
                       </span>
                     </div>
                   ))}
+                  {message.directoryScopes.map((scope) => (
+                    <div
+                      key={scope.name}
+                      className="mt-2 flex items-center gap-2 rounded-lg border bg-background/60 px-2.5 py-1.5 text-xs"
+                    >
+                      <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">{scope.name}</span>
+                      <span className="shrink-0 text-muted-foreground">目录范围</span>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div key={message.id} className="max-w-none">
@@ -173,13 +183,18 @@ function ToolCallCard({
     <Card size="sm" className="max-w-xl bg-muted/30">
       <CardHeader className="grid-cols-[1fr_auto]">
         <CardTitle>
-          {toolCall.name === "read_selected_text_file" ? "读取文本文件" : toolCall.name}
+          {{
+            read_selected_text_file: "读取文本文件",
+            list_selected_directory: "列出目录内容",
+          }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
       </CardHeader>
       <CardContent className="space-y-2 text-xs">
         {toolCall.name === "read_selected_text_file" ? (
           <FileReadResult value={toolCall.result} />
+        ) : toolCall.name === "list_selected_directory" ? (
+          <DirectoryListResult value={toolCall.result} />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -199,6 +214,37 @@ function ToolCallCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function DirectoryListResult({ value }: { value: unknown }) {
+  if (!value || typeof value !== "object") {
+    return <p className="text-muted-foreground">正在列出已授权目录…</p>;
+  }
+  const result = value as {
+    directoryName?: unknown;
+    entries?: unknown;
+    truncated?: unknown;
+  };
+  const entries = Array.isArray(result.entries) ? result.entries : [];
+  return (
+    <div className="space-y-2">
+      <p>
+        {typeof result.directoryName === "string" ? result.directoryName : "已授权目录"} ·{" "}
+        {entries.length} 项{result.truncated === true ? "（结果已截断）" : ""}
+      </p>
+      <div className="grid gap-1">
+        {entries.map((entry, index) => {
+          const item = entry as { name?: unknown; kind?: unknown };
+          return (
+            <div key={`${String(item.name)}-${index}`} className="flex gap-2">
+              <span className="text-muted-foreground">{String(item.kind ?? "other")}</span>
+              <span className="truncate">{String(item.name ?? "")}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

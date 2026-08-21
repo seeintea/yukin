@@ -14,6 +14,7 @@ export interface ConversationMessage {
   role: MessageRole;
   content: string;
   attachments: MessageAttachment[];
+  directoryScopes: MessageDirectoryScope[];
   status: MessageStatus;
   sequence: number;
   createdAt: string;
@@ -23,6 +24,10 @@ export interface ConversationMessage {
 export interface MessageAttachment {
   name: string;
   size: number;
+}
+
+export interface MessageDirectoryScope {
+  name: string;
 }
 
 export interface ConversationSnapshot {
