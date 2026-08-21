@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
 use crate::{
     protocol::{
         common::RecordMetadata,
-        conversation::{Conversation, Message, MessageRole, MessageStatus, Snapshot},
+        conversation::{Attachment, Conversation, Message, MessageRole, MessageStatus, Snapshot},
     },
     AppError, AppResult,
 };
@@ -27,6 +29,13 @@ struct MessageRecord {
     sequence: i64,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(FromRow)]
+struct AttachmentRecord {
+    message_id: String,
+    name: String,
+    size: i64,
 }
 
 impl From<ConversationRecord> for Conversation {
@@ -54,6 +63,7 @@ impl TryFrom<MessageRecord> for Message {
             run_id: record.run_id,
             role,
             content: record.content,
+            attachments: Vec::new(),
             status,
             sequence: record.sequence,
             metadata: RecordMetadata {
@@ -205,7 +215,37 @@ pub async fn list_messages(pool: &SqlitePool, conversation_id: &str) -> AppResul
     .fetch_all(pool)
     .await?;
 
-    records.into_iter().map(TryInto::try_into).collect()
+    let attachment_records = sqlx::query_as::<_, AttachmentRecord>(
+        r#"
+        SELECT attachment.message_id, attachment.name, attachment.size
+        FROM message_attachments attachment
+        INNER JOIN messages message ON message.id = attachment.message_id
+        WHERE message.conversation_id = ?
+        ORDER BY attachment.name
+        "#,
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await?;
+    let mut attachments = HashMap::<String, Vec<Attachment>>::new();
+    for record in attachment_records {
+        attachments
+            .entry(record.message_id)
+            .or_default()
+            .push(Attachment {
+                name: record.name,
+                size: record.size as u64,
+            });
+    }
+
+    records
+        .into_iter()
+        .map(|record| {
+            let mut message: Message = record.try_into()?;
+            message.attachments = attachments.remove(&message.id).unwrap_or_default();
+            Ok(message)
+        })
+        .collect()
 }
 
 #[cfg(test)]

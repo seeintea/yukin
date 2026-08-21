@@ -194,6 +194,7 @@ function appendRunMessages(
   snapshot: ConversationSnapshot | undefined,
   response: AgentRunStartResponse,
   content: string,
+  attachments: ConversationMessage["attachments"],
 ) {
   if (!snapshot || snapshot.messages.some((message) => message.id === response.userMessageId)) {
     return snapshot;
@@ -207,6 +208,7 @@ function appendRunMessages(
       runId: response.runId,
       role: "user",
       content,
+      attachments,
       status: "completed",
       sequence: nextSequence,
       createdAt: timestamp,
@@ -217,6 +219,7 @@ function appendRunMessages(
       runId: response.runId,
       role: "assistant",
       content: "",
+      attachments: [],
       status: "streaming",
       sequence: nextSequence + 1,
       createdAt: timestamp,
@@ -299,7 +302,10 @@ export function useChat(conversationId: string) {
   };
 
   const sendMutation = useMutation({
-    mutationFn: async ({ content, selection, skillId }: ChatInputValue) => {
+    mutationFn: async ({ content, selection, skillId, attachment }: ChatInputValue) => {
+      const messageAttachments = attachment
+        ? [{ name: attachment.name, size: attachment.size }]
+        : [];
       const handleEvent = (event: AgentRunEvent) => {
         const lastSequence = eventSequences.current.get(event.runId) ?? 0;
         if (event.sequence <= lastSequence) {
@@ -318,6 +324,7 @@ export function useChat(conversationId: string) {
                 assistantMessageId: event.data.assistantMessageId,
               },
               content,
+              messageAttachments,
             ),
           );
         } else if (event.event === "output_text_delta") {
@@ -347,12 +354,13 @@ export function useChat(conversationId: string) {
           reasoningEffort: selection.reasoningEffort,
           content,
           skillIds: skillId ? [skillId] : [],
+          attachments: attachment ? [attachment] : [],
         },
         handleEvent,
       );
       dispatch({ type: "started", runId: response.runId });
       queryClient.setQueryData<ConversationSnapshot>(queryKey, (snapshot) =>
-        appendRunMessages(snapshot, response, content),
+        appendRunMessages(snapshot, response, content, messageAttachments),
       );
       return response;
     },

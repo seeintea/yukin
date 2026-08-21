@@ -1,6 +1,11 @@
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
-use crate::{agent::TokenUsage, protocol::agent_run::RunStatus, AppError};
+use crate::{
+    agent::TokenUsage,
+    protocol::{agent_run::RunStatus, conversation::Attachment},
+    storage::conversation,
+    AppError,
+};
 
 use super::{
     cancel, complete, fail_panicked, mark_started, recover_interrupted, snapshot, start,
@@ -47,6 +52,7 @@ fn start_params(run_id: &str) -> StartParams {
         reasoning_effort: None,
         content: "第一个问题".into(),
         skills: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -104,6 +110,28 @@ async fn persists_selected_skill_version() {
     assert_eq!(snapshot.run.skills.len(), 1);
     assert_eq!(snapshot.run.skills[0].id, "time_assistant");
     assert_eq!(snapshot.run.skills[0].version, "1");
+}
+
+#[tokio::test]
+async fn persists_only_attachment_metadata_with_the_user_message() {
+    let pool = setup().await;
+    let mut params = start_params("run-attachment");
+    params.attachments = vec![Attachment {
+        name: "notes.txt".into(),
+        size: 42,
+    }];
+
+    start(&pool, params)
+        .await
+        .expect("start run with attachment");
+
+    let messages = conversation::list_messages(&pool, "conversation-1")
+        .await
+        .expect("list messages");
+    assert_eq!(messages[0].attachments.len(), 1);
+    assert_eq!(messages[0].attachments[0].name, "notes.txt");
+    assert_eq!(messages[0].attachments[0].size, 42);
+    assert!(messages[1].attachments.is_empty());
 }
 
 #[tokio::test]

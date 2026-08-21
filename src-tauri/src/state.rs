@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::{oneshot, watch};
 
 use crate::{
+    files::SelectedFiles,
     protocol::agent_run::ToolCallDecision,
     storage::{database, model_response},
     AppResult,
@@ -87,6 +88,7 @@ pub struct AppState {
     http: Client,
     active_runs: ActiveRuns,
     tool_data_dir: PathBuf,
+    selected_files: SelectedFiles,
 }
 
 impl AppState {
@@ -103,6 +105,7 @@ impl AppState {
             http,
             active_runs: ActiveRuns::default(),
             tool_data_dir,
+            selected_files: SelectedFiles::default(),
         })
     }
 
@@ -120,6 +123,10 @@ impl AppState {
 
     pub fn tool_data_dir(&self) -> &Path {
         &self.tool_data_dir
+    }
+
+    pub(crate) fn selected_files(&self) -> &SelectedFiles {
+        &self.selected_files
     }
 }
 

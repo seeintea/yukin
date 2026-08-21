@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use super::{arguments_digest, ExecutionAuthorization, ToolRegistry};
-use crate::agent::RuntimeError;
+use crate::{agent::RuntimeError, files::SelectedFiles};
 
 #[test]
 fn rejects_unknown_and_invalid_tool_arguments() {
@@ -38,6 +38,71 @@ fn executes_current_time_for_valid_offset() {
     assert!(output["dateTime"]
         .as_str()
         .is_some_and(|value| value.ends_with("+08:00")));
+}
+
+#[test]
+fn file_read_result_summary_excludes_content() {
+    let registry = ToolRegistry::built_in(PathBuf::new());
+    let summary = registry.result_summary(
+        "read_selected_text_file",
+        &json!({
+            "fileName": "notes.txt",
+            "size": 12,
+            "content": "private text",
+            "read": true
+        }),
+    );
+
+    assert_eq!(summary["fileName"], "notes.txt");
+    assert_eq!(summary["size"], 12);
+    assert!(summary.get("content").is_none());
+}
+
+#[test]
+fn rejects_a_file_reference_that_was_not_attached_to_the_run() {
+    let result = tauri::async_runtime::block_on(ToolRegistry::built_in(PathBuf::new()).execute(
+        "read_selected_text_file",
+        &json!({ "referenceId": "not-authorized" }),
+        ExecutionAuthorization::NotRequired,
+    ));
+
+    assert_eq!(
+        result,
+        Err(RuntimeError::File(
+            crate::files::FileError::ReferenceInvalid
+        ))
+    );
+}
+
+#[tokio::test]
+async fn reads_an_authorized_file_without_exposing_content_in_the_summary() {
+    let path =
+        std::env::temp_dir().join(format!("yukin-read-tool-test-{}.txt", uuid::Uuid::now_v7()));
+    tokio::fs::write(&path, "private text")
+        .await
+        .expect("write selected file");
+    let files = SelectedFiles::default();
+    let reference = files.register(path.clone()).await.expect("register file");
+    let file = files.take(&reference).expect("take reference");
+    let registry = ToolRegistry::with_authorized_files(PathBuf::new(), vec![file]);
+    let result = registry
+        .execute(
+            "read_selected_text_file",
+            &json!({ "referenceId": reference.reference_id }),
+            ExecutionAuthorization::NotRequired,
+        )
+        .await
+        .expect("read selected file");
+
+    assert_eq!(result["content"], "private text");
+    assert!(registry
+        .result_summary("read_selected_text_file", &result)
+        .get("content")
+        .is_none());
+
+    tokio::fs::remove_file(path)
+        .await
+        .expect("remove selected file");
 }
 
 #[test]

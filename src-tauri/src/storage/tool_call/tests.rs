@@ -47,6 +47,7 @@ async fn setup(run_id: &str) -> SqlitePool {
             reasoning_effort: None,
             content: "save a note".into(),
             skills: Vec::new(),
+            attachments: Vec::new(),
         },
     )
     .await

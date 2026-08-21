@@ -8,6 +8,8 @@ pub enum AppError {
     Agent(#[from] crate::agent::RuntimeError),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("file: {0}")]
+    File(#[from] crate::files::FileError),
     #[error("db: {0}")]
     Db(#[from] sqlx::Error),
     #[error("migrate: {0}")]
@@ -30,6 +32,7 @@ impl AppError {
             Self::Model(error) => error.code(),
             Self::Agent(error) => error.code(),
             Self::Io(_) => "io",
+            Self::File(error) => error.code(),
             Self::Db(_) => "db",
             Self::Migrate(_) => "migrate",
             Self::Tauri(_) => "tauri",

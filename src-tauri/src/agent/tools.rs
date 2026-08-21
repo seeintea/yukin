@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Component, Path, PathBuf},
 };
 
@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
+use crate::files::AuthorizedFile;
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
 use super::{RuntimeError, ToolDefinition};
@@ -63,6 +64,7 @@ impl From<ApprovalPolicy> for ToolApprovalPolicy {
 
 pub(crate) struct ToolRegistry {
     data_dir: PathBuf,
+    authorized_files: HashMap<String, AuthorizedFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +75,23 @@ pub(crate) enum ExecutionAuthorization {
 
 impl ToolRegistry {
     pub(crate) fn built_in(data_dir: PathBuf) -> Self {
-        Self { data_dir }
+        Self {
+            data_dir,
+            authorized_files: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn with_authorized_files(
+        data_dir: PathBuf,
+        authorized_files: Vec<AuthorizedFile>,
+    ) -> Self {
+        Self {
+            data_dir,
+            authorized_files: authorized_files
+                .into_iter()
+                .map(|file| (file.reference().reference_id.clone(), file))
+                .collect(),
+        }
     }
 
     pub(crate) fn definitions(&self) -> Vec<ToolDefinition> {
@@ -108,6 +126,21 @@ impl ToolRegistry {
                     "additionalProperties": false
                 }),
             },
+            ToolDefinition {
+                name: "read_selected_text_file".into(),
+                description: "Read the UTF-8 contents of a text file explicitly attached to this message. Only the supplied opaque referenceId is accepted.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the attached file."
+                        }
+                    },
+                    "required": ["referenceId"],
+                    "additionalProperties": false
+                }),
+            },
         ]
     }
 
@@ -129,6 +162,7 @@ impl ToolRegistry {
         match name {
             "current_time" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "save_text_note" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
+            "read_selected_text_file" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -154,6 +188,7 @@ impl ToolRegistry {
         match name {
             "current_time" => current_time(arguments),
             "save_text_note" => save_text_note(&self.data_dir, arguments).await,
+            "read_selected_text_file" => self.read_selected_text_file(arguments).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -177,9 +212,60 @@ impl ToolRegistry {
                     })?;
                 validate_note_arguments(&arguments)
             }
+            "read_selected_text_file" => {
+                let arguments: ReadSelectedTextFileArguments =
+                    serde_json::from_value(arguments.clone()).map_err(|error| {
+                        RuntimeError::InvalidToolArguments {
+                            name: name.into(),
+                            message: error.to_string(),
+                        }
+                    })?;
+                if self.authorized_files.contains_key(&arguments.reference_id) {
+                    Ok(())
+                } else {
+                    Err(crate::files::FileError::ReferenceInvalid.into())
+                }
+            }
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
+
+    pub(crate) fn result_summary(&self, name: &str, result: &Value) -> Value {
+        if name == "read_selected_text_file" {
+            json!({
+                "fileName": result["fileName"],
+                "size": result["size"],
+                "read": result["read"]
+            })
+        } else {
+            result.clone()
+        }
+    }
+
+    async fn read_selected_text_file(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments: ReadSelectedTextFileArguments = serde_json::from_value(arguments.clone())
+            .map_err(|error| RuntimeError::InvalidToolArguments {
+                name: "read_selected_text_file".into(),
+                message: error.to_string(),
+            })?;
+        let file = self
+            .authorized_files
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let content = file.read().await?;
+        Ok(json!({
+            "fileName": file.reference().name,
+            "size": file.reference().size,
+            "content": content,
+            "read": true
+        }))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReadSelectedTextFileArguments {
+    reference_id: String,
 }
 
 pub(crate) fn arguments_digest(arguments: &Value) -> Result<(String, String), RuntimeError> {

@@ -15,8 +15,10 @@ use crate::{
         CompletionRequest, Message, ModelError, Role, RuntimeError, ThinkingMode, TokenUsage,
         ToolCall, ToolCallFunction, ToolCallType,
     },
+    files::{AuthorizedFile, SelectedFiles},
     protocol::{
         agent_run::{Event, EventKind, Phase, StartRequest, StartResponse, ToolCallDecision},
+        conversation::Attachment,
         model_provider::ReasoningEffort,
     },
     security::keychain,
@@ -30,7 +32,7 @@ const PARTIAL_WRITE_CHARS: usize = 256;
 const MAX_MODEL_STEPS: usize = 4;
 const MAX_TOOL_CALLS: usize = 4;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_TOOL_OUTPUT_BYTES: usize = 32 * 1024;
+const MAX_TOOL_OUTPUT_BYTES: usize = 40 * 1024;
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) type EventSink = Box<dyn Fn(Event) + Send + Sync>;
@@ -43,14 +45,49 @@ pub(crate) struct PreparedRun {
     reasoning_effort: Option<ReasoningEffort>,
     messages: Vec<Message>,
     allowed_tools: HashSet<String>,
+    authorized_files: Vec<AuthorizedFile>,
 }
 
-pub(crate) async fn prepare(pool: &SqlitePool, request: StartRequest) -> AppResult<PreparedRun> {
+pub(crate) async fn prepare(
+    pool: &SqlitePool,
+    selected_files: &SelectedFiles,
+    request: StartRequest,
+) -> AppResult<PreparedRun> {
+    if request.attachments.len() > 1 {
+        return Err(AppError::Validation(
+            "only one text file can be attached to a message".into(),
+        ));
+    }
     let run_id = Uuid::now_v7().to_string();
     let user_message_id = Uuid::now_v7().to_string();
     let assistant_message_id = Uuid::now_v7().to_string();
-    let available_tools = ToolRegistry::built_in(PathBuf::new()).names();
-    let resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
+    let mut available_tools = ToolRegistry::built_in(PathBuf::new()).names();
+    available_tools.remove("read_selected_text_file");
+    let mut resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
+    let authorized_files = request
+        .attachments
+        .iter()
+        .map(|reference| selected_files.take(reference))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !authorized_files.is_empty() {
+        resolved_skills
+            .allowed_tools
+            .insert("read_selected_text_file".into());
+        for file in &authorized_files {
+            let reference = file.reference();
+            resolved_skills.instructions.push_str(&format!(
+                "\n\nThe user attached the text file {:?} ({} bytes). Call read_selected_text_file with referenceId {:?} when its contents are needed. Never expose or invent a local path.",
+                reference.name, reference.size, reference.reference_id
+            ));
+        }
+    }
+    let attachments = authorized_files
+        .iter()
+        .map(|file| Attachment {
+            name: file.reference().name.clone(),
+            size: file.reference().size,
+        })
+        .collect();
     let history = model_response::start(
         pool,
         model_response::StartParams {
@@ -65,6 +102,7 @@ pub(crate) async fn prepare(pool: &SqlitePool, request: StartRequest) -> AppResu
                 .map(|effort| effort.as_str().into()),
             content: request.content.clone(),
             skills: resolved_skills.selected,
+            attachments,
         },
     )
     .await?;
@@ -96,6 +134,7 @@ pub(crate) async fn prepare(pool: &SqlitePool, request: StartRequest) -> AppResu
         reasoning_effort: request.reasoning_effort,
         messages,
         allowed_tools: resolved_skills.allowed_tools,
+        authorized_files,
     })
 }
 
@@ -215,7 +254,8 @@ async fn execute_stream(
         Ok(None) => return failed("", ModelError::MissingCredential.into()),
         Err(error) => return failed("", error),
     };
-    let registry = ToolRegistry::built_in(tool_data_dir);
+    let registry =
+        ToolRegistry::with_authorized_files(tool_data_dir, prepared.authorized_files.clone());
     let mut messages = prepared.messages.clone();
     let mut content = String::new();
     let mut usage = TokenUsage {
@@ -566,12 +606,25 @@ async fn execute_stream(
                     return failed(content, error.into());
                 }
             };
-            if let Err(error) = tool_call::complete(pool, &tool_call.id, &result_json).await {
+            let result_summary = registry.result_summary(&tool_call.function.name, &result);
+            let result_summary_json = match serde_json::to_string(&result_summary) {
+                Ok(value) => value,
+                Err(error) => {
+                    let error = RuntimeError::ToolExecution {
+                        name: tool_call.function.name,
+                        message: error.to_string(),
+                    };
+                    persist_tool_failure(pool, emitter, &tool_call.id, &error).await;
+                    return failed(content, error.into());
+                }
+            };
+            if let Err(error) = tool_call::complete(pool, &tool_call.id, &result_summary_json).await
+            {
                 return failed(content, error);
             }
             emitter.emit(EventKind::ToolCallCompleted {
                 tool_call_id: tool_call.id.clone(),
-                result,
+                result: result_summary,
             });
             tracing::debug!(
                 conversation_id = %prepared.conversation_id,

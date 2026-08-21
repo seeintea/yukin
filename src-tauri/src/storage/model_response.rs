@@ -5,7 +5,7 @@ use crate::{
     protocol::{
         agent_run::{Run, RunSkill, RunStatus, Snapshot},
         common::RecordMetadata,
-        conversation::{Message, MessageRole, MessageStatus},
+        conversation::{Attachment, Message, MessageRole, MessageStatus},
     },
     storage::tool_call,
     AppError, AppResult,
@@ -21,6 +21,7 @@ pub(crate) struct StartParams {
     pub reasoning_effort: Option<String>,
     pub content: String,
     pub skills: Vec<RunSkill>,
+    pub attachments: Vec<Attachment>,
 }
 
 pub(crate) struct HistoryMessage {
@@ -110,6 +111,7 @@ impl TryFrom<AssistantMessageRecord> for Message {
             run_id: record.run_id,
             role: MessageRole::Assistant,
             content: record.content,
+            attachments: Vec::new(),
             status,
             sequence: record.sequence,
             metadata: RecordMetadata {
@@ -179,6 +181,14 @@ pub(crate) async fn start(
     .bind(next_sequence)
     .execute(&mut *transaction)
     .await?;
+    for attachment in &params.attachments {
+        sqlx::query("INSERT INTO message_attachments (message_id, name, size) VALUES (?, ?, ?)")
+            .bind(&params.user_message_id)
+            .bind(&attachment.name)
+            .bind(attachment.size as i64)
+            .execute(&mut *transaction)
+            .await?;
+    }
     sqlx::query(
         r#"
         INSERT INTO messages (

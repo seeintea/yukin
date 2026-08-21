@@ -1,3 +1,4 @@
+import { FileTextIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { ChatInput } from "#/components/chat-input";
@@ -87,6 +88,18 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
                   className="ml-auto max-w-[80%] rounded-2xl bg-muted px-4 py-3 whitespace-pre-wrap"
                 >
                   {message.content}
+                  {message.attachments.map((attachment) => (
+                    <div
+                      key={attachment.name}
+                      className="mt-2 flex items-center gap-2 rounded-lg border bg-background/60 px-2.5 py-1.5 text-xs"
+                    >
+                      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">{attachment.name}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {formatFileSize(attachment.size)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div key={message.id} className="max-w-none">
@@ -159,12 +172,20 @@ function ToolCallCard({
   return (
     <Card size="sm" className="max-w-xl bg-muted/30">
       <CardHeader className="grid-cols-[1fr_auto]">
-        <CardTitle>{toolCall.name}</CardTitle>
+        <CardTitle>
+          {toolCall.name === "read_selected_text_file" ? "读取文本文件" : toolCall.name}
+        </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
       </CardHeader>
       <CardContent className="space-y-2 text-xs">
-        <ToolCallValue label="参数" value={toolCall.arguments} />
-        {toolCall.result !== null && <ToolCallValue label="结果" value={toolCall.result} />}
+        {toolCall.name === "read_selected_text_file" ? (
+          <FileReadResult value={toolCall.result} />
+        ) : (
+          <>
+            <ToolCallValue label="参数" value={toolCall.arguments} />
+            {toolCall.result !== null && <ToolCallValue label="结果" value={toolCall.result} />}
+          </>
+        )}
         {toolCall.errorMessage && <p className="text-destructive">{toolCall.errorMessage}</p>}
         {toolCall.status === "waiting_approval" && (
           <div className="flex justify-end gap-2 pt-2">
@@ -179,6 +200,23 @@ function ToolCallCard({
       </CardContent>
     </Card>
   );
+}
+
+function FileReadResult({ value }: { value: unknown }) {
+  if (!value || typeof value !== "object") {
+    return <p className="text-muted-foreground">正在读取已授权附件…</p>;
+  }
+  const result = value as { fileName?: unknown; size?: unknown };
+  return (
+    <p>
+      {typeof result.fileName === "string" ? result.fileName : "已授权附件"}
+      {typeof result.size === "number" ? ` · ${formatFileSize(result.size)}` : ""}
+    </p>
+  );
+}
+
+function formatFileSize(size: number) {
+  return size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KiB`;
 }
 
 function ToolCallValue({ label, value }: { label: string; value: unknown }) {

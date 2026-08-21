@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{conversation::Message, model_provider::ReasoningEffort};
+use super::{conversation::Message, file::Reference, model_provider::ReasoningEffort};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +12,8 @@ pub struct StartRequest {
     pub content: String,
     #[serde(default)]
     pub skill_ids: Vec<String>,
+    #[serde(default)]
+    pub attachments: Vec<Reference>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,12 +253,18 @@ mod tests {
             "reasoningEffort": "high",
             "content": "你好"
             ,"skillIds": ["time_assistant"]
+            ,"attachments": [{
+                "referenceId": "file-1",
+                "name": "notes.txt",
+                "size": 42
+            }]
         }))
         .expect("valid run start request");
 
         assert_eq!(request.conversation_id, "conversation-1");
         assert_eq!(request.content, "你好");
         assert_eq!(request.skill_ids, ["time_assistant"]);
+        assert_eq!(request.attachments[0].reference_id, "file-1");
     }
 
     #[test]

@@ -17,9 +17,17 @@ pub struct Message {
     pub run_id: Option<String>,
     pub role: MessageRole,
     pub content: String,
+    pub attachments: Vec<Attachment>,
     pub status: MessageStatus,
     pub sequence: i64,
     pub metadata: RecordMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub name: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

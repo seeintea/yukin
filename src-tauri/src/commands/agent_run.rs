@@ -21,7 +21,7 @@ pub async fn agent_run_start(
     events: Channel<Event>,
 ) -> AppResult<StartResponse> {
     let conversation_id = request.conversation_id.clone();
-    let prepared = agent_run::prepare(state.db(), request)
+    let prepared = agent_run::prepare(state.db(), state.selected_files(), request)
         .await
         .log_error("agent_run_start")?;
     let response = prepared.response.clone();

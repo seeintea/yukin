@@ -79,6 +79,8 @@ pub enum RuntimeError {
     RepeatedToolCall(String),
     #[error("tool execution failed for {name}: {message}")]
     ToolExecution { name: String, message: String },
+    #[error("file tool failed: {0}")]
+    File(#[from] crate::files::FileError),
 }
 
 impl RuntimeError {
@@ -97,6 +99,7 @@ impl RuntimeError {
             Self::ToolOutputLimit(_) => "tool_output_limit",
             Self::RepeatedToolCall(_) => "tool_repeated_call",
             Self::ToolExecution { .. } => "tool_execution",
+            Self::File(error) => error.code(),
         }
     }
 }

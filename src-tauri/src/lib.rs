@@ -2,6 +2,7 @@ pub mod agent;
 mod commands;
 mod diagnostics;
 mod error;
+mod files;
 mod model_provider;
 mod protocol;
 mod security;
@@ -51,6 +52,7 @@ pub fn run() {
             tracing::info!("yukin setup complete");
             Ok(())
         })
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::agent_run::agent_run_start,
@@ -66,6 +68,8 @@ pub fn run() {
             commands::conversation::conversation_rename,
             commands::conversation::conversation_delete,
             commands::diagnostics::diagnostics_frontend_error_report,
+            commands::file::file_reference_select,
+            commands::file::file_reference_release,
             commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,

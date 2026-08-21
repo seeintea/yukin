@@ -13,10 +13,16 @@ export interface ConversationMessage {
   runId: string | null;
   role: MessageRole;
   content: string;
+  attachments: MessageAttachment[];
   status: MessageStatus;
   sequence: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MessageAttachment {
+  name: string;
+  size: number;
 }
 
 export interface ConversationSnapshot {
