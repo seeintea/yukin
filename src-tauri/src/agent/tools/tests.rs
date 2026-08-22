@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use super::{arguments_digest, ExecutionAuthorization, ToolRegistry};
-use crate::{agent::RuntimeError, files::SelectedFiles};
+use crate::{
+    agent::RuntimeError,
+    files::{SelectedDirectories, SelectedFiles},
+};
 
 #[test]
 fn rejects_unknown_and_invalid_tool_arguments() {
@@ -90,6 +93,20 @@ fn rejects_a_directory_reference_that_was_not_attached_to_the_run() {
     );
 }
 
+#[test]
+fn rejects_invalid_directory_search_arguments() {
+    let result = tauri::async_runtime::block_on(ToolRegistry::built_in(PathBuf::new()).execute(
+        "search_selected_directory",
+        &json!({ "referenceId": "not-authorized", "query": "  " }),
+        ExecutionAuthorization::NotRequired,
+    ));
+
+    assert!(matches!(
+        result,
+        Err(RuntimeError::InvalidToolArguments { .. })
+    ));
+}
+
 #[tokio::test]
 async fn reads_an_authorized_file_without_exposing_content_in_the_summary() {
     let path =
@@ -119,6 +136,46 @@ async fn reads_an_authorized_file_without_exposing_content_in_the_summary() {
     tokio::fs::remove_file(path)
         .await
         .expect("remove selected file");
+}
+
+#[tokio::test]
+async fn searches_an_authorized_directory_without_exposing_absolute_paths() {
+    let path =
+        std::env::temp_dir().join(format!("yukin-search-tool-test-{}", uuid::Uuid::now_v7()));
+    tokio::fs::create_dir_all(path.join("nested"))
+        .await
+        .expect("create selected directory");
+    tokio::fs::write(path.join("nested/report.txt"), "private text")
+        .await
+        .expect("write matching file");
+    let directories = SelectedDirectories::default();
+    let reference = directories
+        .register(path.clone())
+        .await
+        .expect("register directory");
+    let directory = directories.take(&reference).expect("take reference");
+    let registry = ToolRegistry::with_authorizations(PathBuf::new(), Vec::new(), vec![directory]);
+    let result = registry
+        .execute(
+            "search_selected_directory",
+            &json!({
+                "referenceId": reference.reference_id,
+                "query": "REPORT",
+                "kind": "file"
+            }),
+            ExecutionAuthorization::NotRequired,
+        )
+        .await
+        .expect("search selected directory");
+
+    assert_eq!(result["query"], "REPORT");
+    assert_eq!(result["kind"], "file");
+    assert_eq!(result["entries"][0]["relativePath"], "nested/report.txt");
+    assert!(!result.to_string().contains(path.to_string_lossy().as_ref()));
+
+    tokio::fs::remove_dir_all(path)
+        .await
+        .expect("remove selected directory");
 }
 
 #[test]

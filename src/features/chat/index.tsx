@@ -186,6 +186,7 @@ function ToolCallCard({
           {{
             read_selected_text_file: "读取文本文件",
             list_selected_directory: "列出目录内容",
+            search_selected_directory: "搜索目录",
           }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
@@ -195,6 +196,8 @@ function ToolCallCard({
           <FileReadResult value={toolCall.result} />
         ) : toolCall.name === "list_selected_directory" ? (
           <DirectoryListResult value={toolCall.result} />
+        ) : toolCall.name === "search_selected_directory" ? (
+          <DirectorySearchResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -214,6 +217,56 @@ function ToolCallCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function DirectorySearchResult({
+  argumentsValue,
+  value,
+}: {
+  argumentsValue: unknown;
+  value: unknown;
+}) {
+  const searchArguments =
+    argumentsValue && typeof argumentsValue === "object"
+      ? (argumentsValue as { query?: unknown; kind?: unknown })
+      : {};
+  if (!value || typeof value !== "object") {
+    return (
+      <p className="text-muted-foreground">
+        正在已授权目录中搜索“{String(searchArguments.query ?? "")}”…
+      </p>
+    );
+  }
+  const result = value as {
+    directoryName?: unknown;
+    query?: unknown;
+    kind?: unknown;
+    entries?: unknown;
+    truncated?: unknown;
+  };
+  const entries = Array.isArray(result.entries) ? result.entries : [];
+  const kind =
+    { file: "文件", directory: "目录", any: "文件和目录" }[String(result.kind)] ?? "项目";
+  return (
+    <div className="space-y-2">
+      <p>
+        {typeof result.directoryName === "string" ? result.directoryName : "已授权目录"} · 搜索“
+        {String(result.query ?? searchArguments.query ?? "")}” · {entries.length} 个{kind}
+        {result.truncated === true ? "（结果已截断）" : ""}
+      </p>
+      <div className="grid gap-1">
+        {entries.map((entry, index) => {
+          const item = entry as { relativePath?: unknown; kind?: unknown };
+          return (
+            <div key={`${String(item.relativePath)}-${index}`} className="flex gap-2">
+              <span className="text-muted-foreground">{String(item.kind ?? "other")}</span>
+              <span className="truncate">{String(item.relativePath ?? "")}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -11,6 +11,8 @@ use crate::protocol::file::{DirectoryReference, Reference};
 
 pub(crate) const MAX_SELECTED_FILE_BYTES: u64 = 16 * 1024;
 pub(crate) const MAX_DIRECTORY_ENTRIES: usize = 100;
+pub(crate) const MAX_DIRECTORY_SEARCH_DEPTH: usize = 4;
+pub(crate) const MAX_DIRECTORY_SEARCH_RESULTS: usize = 50;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizedFile {
@@ -33,11 +35,7 @@ impl AuthorizedDirectory {
     }
 
     pub(crate) async fn list(&self) -> Result<DirectoryListing, FileError> {
-        validate_directory_path(&self.selected_path).await?;
-        let canonical_path = tokio::fs::canonicalize(&self.selected_path).await?;
-        if canonical_path != self.canonical_path {
-            return Err(FileError::Changed);
-        }
+        let canonical_path = self.validate_root().await?;
         let mut reader = tokio::fs::read_dir(&canonical_path).await?;
         let mut entries = Vec::new();
         let mut truncated = false;
@@ -62,6 +60,96 @@ impl AuthorizedDirectory {
         entries.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(DirectoryListing { entries, truncated })
     }
+
+    pub(crate) async fn search(
+        &self,
+        query: &str,
+        kind: DirectorySearchKind,
+    ) -> Result<DirectorySearch, FileError> {
+        let canonical_path = self.validate_root().await?;
+        let normalized_query = query.to_lowercase();
+        let mut pending = VecDeque::from([(canonical_path.clone(), PathBuf::new(), 0)]);
+        let mut entries = Vec::new();
+        let mut truncated = false;
+
+        while let Some((directory_path, relative_directory, depth)) = pending.pop_front() {
+            let metadata = tokio::fs::symlink_metadata(&directory_path).await?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                continue;
+            }
+            let resolved_directory = tokio::fs::canonicalize(&directory_path).await?;
+            if !resolved_directory.starts_with(&canonical_path) {
+                continue;
+            }
+            let mut reader = tokio::fs::read_dir(resolved_directory).await?;
+            let mut children = Vec::new();
+            while let Some(entry) = reader.next_entry().await? {
+                children.push(entry);
+            }
+            children.sort_by_key(tokio::fs::DirEntry::file_name);
+
+            for child in children {
+                let metadata = tokio::fs::symlink_metadata(child.path()).await?;
+                if metadata.file_type().is_symlink() {
+                    continue;
+                }
+                let name = child.file_name().to_string_lossy().into_owned();
+                let relative_path = relative_directory.join(&name);
+                let child_depth = depth + 1;
+                if child_depth > MAX_DIRECTORY_SEARCH_DEPTH {
+                    continue;
+                }
+                let (entry_kind, size) = if metadata.is_dir() {
+                    if child_depth < MAX_DIRECTORY_SEARCH_DEPTH {
+                        pending.push_back((child.path(), relative_path.clone(), child_depth));
+                    }
+                    (DirectorySearchKind::Directory, None)
+                } else if metadata.is_file() {
+                    (DirectorySearchKind::File, Some(metadata.len()))
+                } else {
+                    continue;
+                };
+
+                if name.to_lowercase().contains(&normalized_query) && kind.matches(entry_kind) {
+                    if entries.len() == MAX_DIRECTORY_SEARCH_RESULTS {
+                        truncated = true;
+                        break;
+                    }
+                    entries.push(DirectorySearchEntry {
+                        name,
+                        relative_path: display_relative_path(&relative_path),
+                        kind: entry_kind,
+                        size,
+                    });
+                }
+            }
+            if truncated {
+                break;
+            }
+        }
+
+        entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        Ok(DirectorySearch { entries, truncated })
+    }
+
+    async fn validate_root(&self) -> Result<PathBuf, FileError> {
+        validate_directory_path(&self.selected_path).await?;
+        let canonical_path = tokio::fs::canonicalize(&self.selected_path).await?;
+        if canonical_path != self.canonical_path {
+            return Err(FileError::Changed);
+        }
+        Ok(canonical_path)
+    }
+}
+
+fn display_relative_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 pub(crate) struct DirectoryListing {
@@ -73,6 +161,39 @@ pub(crate) struct DirectoryEntry {
     pub(crate) name: String,
     pub(crate) kind: &'static str,
     pub(crate) size: Option<u64>,
+}
+
+pub(crate) struct DirectorySearch {
+    pub(crate) entries: Vec<DirectorySearchEntry>,
+    pub(crate) truncated: bool,
+}
+
+pub(crate) struct DirectorySearchEntry {
+    pub(crate) name: String,
+    pub(crate) relative_path: String,
+    pub(crate) kind: DirectorySearchKind,
+    pub(crate) size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirectorySearchKind {
+    Any,
+    File,
+    Directory,
+}
+
+impl DirectorySearchKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::File => "file",
+            Self::Directory => "directory",
+        }
+    }
+
+    fn matches(self, entry_kind: Self) -> bool {
+        self == Self::Any || self == entry_kind
+    }
 }
 
 impl AuthorizedFile {
@@ -310,8 +431,8 @@ impl From<std::io::Error> for FileError {
 #[cfg(test)]
 mod tests {
     use super::{
-        FileError, SelectedDirectories, SelectedFiles, MAX_DIRECTORY_ENTRIES,
-        MAX_SELECTED_FILE_BYTES,
+        DirectorySearchKind, FileError, SelectedDirectories, SelectedFiles, MAX_DIRECTORY_ENTRIES,
+        MAX_DIRECTORY_SEARCH_RESULTS, MAX_SELECTED_FILE_BYTES,
     };
 
     fn test_path(name: &str) -> std::path::PathBuf {
@@ -397,6 +518,92 @@ mod tests {
             .entries
             .iter()
             .any(|entry| entry.name == "hidden.txt"));
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn searches_names_recursively_with_kind_and_relative_paths() {
+        let path = test_path("search-directory");
+        tokio::fs::create_dir_all(path.join("reports/archive"))
+            .await
+            .expect("create nested directories");
+        tokio::fs::write(path.join("report-summary.txt"), "summary")
+            .await
+            .expect("write root match");
+        tokio::fs::write(path.join("reports/archive/REPORT-2025.md"), "archive")
+            .await
+            .expect("write nested match");
+        tokio::fs::write(path.join("reports/archive/notes.md"), "notes")
+            .await
+            .expect("write non-match");
+        tokio::fs::create_dir_all(path.join("one/two/three/four"))
+            .await
+            .expect("create depth-limited directories");
+        tokio::fs::write(path.join("one/two/three/four/too-deep-report.txt"), "deep")
+            .await
+            .expect("write depth-limited file");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+
+        let search = directory
+            .search("report", DirectorySearchKind::File)
+            .await
+            .expect("search directory");
+        let paths = search
+            .entries
+            .iter()
+            .map(|entry| entry.relative_path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            ["report-summary.txt", "reports/archive/REPORT-2025.md"]
+        );
+        assert!(!search.truncated);
+        assert!(!paths.contains(&"one/two/three/four/too-deep-report.txt"));
+
+        let directory_search = directory
+            .search("reports", DirectorySearchKind::Directory)
+            .await
+            .expect("search directories");
+        assert_eq!(directory_search.entries.len(), 1);
+        assert_eq!(directory_search.entries[0].relative_path, "reports");
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn limits_directory_search_results() {
+        let path = test_path("limited-search-directory");
+        tokio::fs::create_dir(&path)
+            .await
+            .expect("create directory");
+        for index in 0..=MAX_DIRECTORY_SEARCH_RESULTS {
+            tokio::fs::write(path.join(format!("match-{index:03}.txt")), "text")
+                .await
+                .expect("write matching file");
+        }
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+
+        let search = directory
+            .search("match", DirectorySearchKind::Any)
+            .await
+            .expect("search directory");
+        assert_eq!(search.entries.len(), MAX_DIRECTORY_SEARCH_RESULTS);
+        assert!(search.truncated);
 
         tokio::fs::remove_dir_all(path)
             .await

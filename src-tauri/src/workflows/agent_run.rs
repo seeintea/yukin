@@ -71,6 +71,7 @@ pub(crate) async fn prepare(
     let mut available_tools = ToolRegistry::built_in(PathBuf::new()).names();
     available_tools.remove("read_selected_text_file");
     available_tools.remove("list_selected_directory");
+    available_tools.remove("search_selected_directory");
     let mut resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
     let authorized_files = request
         .attachments
@@ -98,10 +99,13 @@ pub(crate) async fn prepare(
         resolved_skills
             .allowed_tools
             .insert("list_selected_directory".into());
+        resolved_skills
+            .allowed_tools
+            .insert("search_selected_directory".into());
         for directory in &authorized_directories {
             let reference = directory.reference();
             resolved_skills.instructions.push_str(&format!(
-                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect only its direct children. Never expose or invent a local path.",
+                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect its direct children, or search_selected_directory with the same referenceId to search names recursively within the authorized scope. Never expose or invent a local path.",
                 reference.name, reference.reference_id
             ));
         }

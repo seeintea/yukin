@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use crate::files::{AuthorizedDirectory, AuthorizedFile};
+use crate::files::{AuthorizedDirectory, AuthorizedFile, DirectorySearchKind};
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
 use super::{RuntimeError, ToolDefinition};
@@ -133,6 +133,32 @@ impl ToolRegistry {
                 }),
             },
             ToolDefinition {
+                name: "search_selected_directory".into(),
+                description: "Search file and directory names within a directory explicitly selected by the user. Returns up to 50 relative paths, searches at most 4 levels deep, skips symbolic links, and never exposes local absolute paths.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the selected directory."
+                        },
+                        "query": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "description": "Case-insensitive text to match within each file or directory name."
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": ["any", "file", "directory"],
+                            "description": "Optional result type filter. Defaults to any."
+                        }
+                    },
+                    "required": ["referenceId", "query"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
                 name: "save_text_note".into(),
                 description: "Create a new UTF-8 text note in the app's managed agent-files directory. Existing files are never overwritten. This changes the filesystem and always requires user approval.".into(),
                 input_schema: json!({
@@ -186,6 +212,7 @@ impl ToolRegistry {
             "save_text_note" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "read_selected_text_file" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "list_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
+            "search_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -213,6 +240,7 @@ impl ToolRegistry {
             "save_text_note" => save_text_note(&self.data_dir, arguments).await,
             "read_selected_text_file" => self.read_selected_text_file(arguments).await,
             "list_selected_directory" => self.list_selected_directory(arguments).await,
+            "search_selected_directory" => self.search_selected_directory(arguments).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -258,6 +286,18 @@ impl ToolRegistry {
                             message: error.to_string(),
                         }
                     })?;
+                if self
+                    .authorized_directories
+                    .contains_key(&arguments.reference_id)
+                {
+                    Ok(())
+                } else {
+                    Err(crate::files::FileError::ReferenceInvalid.into())
+                }
+            }
+            "search_selected_directory" => {
+                let arguments = parse_directory_search_arguments(name, arguments)?;
+                validate_directory_search_arguments(name, &arguments)?;
                 if self
                     .authorized_directories
                     .contains_key(&arguments.reference_id)
@@ -330,6 +370,36 @@ impl ToolRegistry {
             "truncated": listing.truncated
         }))
     }
+
+    async fn search_selected_directory(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments = parse_directory_search_arguments("search_selected_directory", arguments)?;
+        validate_directory_search_arguments("search_selected_directory", &arguments)?;
+        let directory = self
+            .authorized_directories
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let query = arguments.query.trim();
+        let search = directory.search(query, arguments.kind.into()).await?;
+        let entries = search
+            .entries
+            .into_iter()
+            .map(|entry| {
+                json!({
+                    "name": entry.name,
+                    "relativePath": entry.relative_path,
+                    "kind": entry.kind.as_str(),
+                    "size": entry.size
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "query": query,
+            "kind": arguments.kind.as_str(),
+            "entries": entries,
+            "truncated": search.truncated
+        }))
+    }
 }
 
 #[derive(Deserialize)]
@@ -342,6 +412,68 @@ struct ReadSelectedTextFileArguments {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DirectoryReferenceArguments {
     reference_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectorySearchArguments {
+    reference_id: String,
+    query: String,
+    #[serde(default)]
+    kind: DirectorySearchKindArgument,
+}
+
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DirectorySearchKindArgument {
+    #[default]
+    Any,
+    File,
+    Directory,
+}
+
+impl DirectorySearchKindArgument {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::File => "file",
+            Self::Directory => "directory",
+        }
+    }
+}
+
+impl From<DirectorySearchKindArgument> for DirectorySearchKind {
+    fn from(value: DirectorySearchKindArgument) -> Self {
+        match value {
+            DirectorySearchKindArgument::Any => Self::Any,
+            DirectorySearchKindArgument::File => Self::File,
+            DirectorySearchKindArgument::Directory => Self::Directory,
+        }
+    }
+}
+
+fn parse_directory_search_arguments(
+    name: &str,
+    arguments: &Value,
+) -> Result<DirectorySearchArguments, RuntimeError> {
+    serde_json::from_value(arguments.clone()).map_err(|error| RuntimeError::InvalidToolArguments {
+        name: name.into(),
+        message: error.to_string(),
+    })
+}
+
+fn validate_directory_search_arguments(
+    name: &str,
+    arguments: &DirectorySearchArguments,
+) -> Result<(), RuntimeError> {
+    let query = arguments.query.trim();
+    if query.is_empty() || query.chars().count() > 128 || query.chars().any(char::is_control) {
+        return Err(RuntimeError::InvalidToolArguments {
+            name: name.into(),
+            message: "query must contain 1 to 128 non-control characters".into(),
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn arguments_digest(arguments: &Value) -> Result<(String, String), RuntimeError> {
