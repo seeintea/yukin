@@ -159,6 +159,21 @@ impl ToolRegistry {
                 }),
             },
             ToolDefinition {
+                name: "get_directory_entry_metadata".into(),
+                description: "Get size, modification time, entry type, and file extension for an entry returned by list_selected_directory or search_selected_directory.".into(),
+                input_schema: directory_entry_input_schema(),
+            },
+            ToolDefinition {
+                name: "open_directory_entry".into(),
+                description: "Open a previously listed or searched directory entry with the system default application. This always requires user approval.".into(),
+                input_schema: directory_entry_input_schema(),
+            },
+            ToolDefinition {
+                name: "reveal_directory_entry".into(),
+                description: "Reveal a previously listed or searched directory entry in the system file manager. This always requires user approval.".into(),
+                input_schema: directory_entry_input_schema(),
+            },
+            ToolDefinition {
                 name: "save_text_note".into(),
                 description: "Create a new UTF-8 text note in the app's managed agent-files directory. Existing files are never overwritten. This changes the filesystem and always requires user approval.".into(),
                 input_schema: json!({
@@ -213,6 +228,10 @@ impl ToolRegistry {
             "read_selected_text_file" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "list_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "search_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
+            "get_directory_entry_metadata" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
+            "open_directory_entry" | "reveal_directory_entry" => {
+                Ok((RiskLevel::Write, ApprovalPolicy::Always))
+            }
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -241,6 +260,9 @@ impl ToolRegistry {
             "read_selected_text_file" => self.read_selected_text_file(arguments).await,
             "list_selected_directory" => self.list_selected_directory(arguments).await,
             "search_selected_directory" => self.search_selected_directory(arguments).await,
+            "get_directory_entry_metadata" => self.directory_entry_metadata(arguments).await,
+            "open_directory_entry" => self.directory_entry_action(name, arguments, false).await,
+            "reveal_directory_entry" => self.directory_entry_action(name, arguments, true).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -307,6 +329,10 @@ impl ToolRegistry {
                     Err(crate::files::FileError::ReferenceInvalid.into())
                 }
             }
+            "get_directory_entry_metadata" | "open_directory_entry" | "reveal_directory_entry" => {
+                let arguments = parse_directory_entry_arguments(name, arguments)?;
+                self.directory_for_entry(&arguments).map(|_| ())
+            }
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
     }
@@ -360,7 +386,8 @@ impl ToolRegistry {
                 json!({
                     "name": entry.name,
                     "kind": entry.kind,
-                    "size": entry.size
+                    "size": entry.size,
+                    "targetReferenceId": entry.target_reference_id
                 })
             })
             .collect::<Vec<_>>();
@@ -385,6 +412,7 @@ impl ToolRegistry {
             .into_iter()
             .map(|entry| {
                 json!({
+                    "targetReferenceId": entry.target_reference_id,
                     "name": entry.name,
                     "relativePath": entry.relative_path,
                     "kind": entry.kind.as_str(),
@@ -400,6 +428,90 @@ impl ToolRegistry {
             "truncated": search.truncated
         }))
     }
+
+    async fn directory_entry_metadata(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments = parse_directory_entry_arguments("get_directory_entry_metadata", arguments)?;
+        let directory = self.directory_for_entry(&arguments)?;
+        let metadata = directory
+            .entry_metadata(&arguments.target_reference_id)
+            .await?;
+        Ok(json!({
+            "targetReferenceId": metadata.target_reference_id,
+            "name": metadata.name,
+            "relativePath": metadata.relative_path,
+            "kind": metadata.kind.as_str(),
+            "size": metadata.size,
+            "modifiedAt": metadata.modified_at,
+            "extension": metadata.extension
+        }))
+    }
+
+    async fn directory_entry_action(
+        &self,
+        name: &str,
+        arguments: &Value,
+        reveal: bool,
+    ) -> Result<Value, RuntimeError> {
+        let arguments = parse_directory_entry_arguments(name, arguments)?;
+        let directory = self.directory_for_entry(&arguments)?;
+        let path = directory
+            .resolve_entry(&arguments.target_reference_id)
+            .await?;
+        let action = tauri::async_runtime::spawn_blocking(move || {
+            if reveal {
+                tauri_plugin_opener::reveal_item_in_dir(path)
+            } else {
+                tauri_plugin_opener::open_path(path, None::<&str>)
+            }
+        })
+        .await
+        .map_err(|_| RuntimeError::ToolExecution {
+            name: name.into(),
+            message: "system file action task failed".into(),
+        })?;
+        action.map_err(|_| RuntimeError::ToolExecution {
+            name: name.into(),
+            message: "system file action failed".into(),
+        })?;
+        Ok(json!({
+            "relativePath": arguments.relative_path,
+            "action": if reveal { "revealed" } else { "opened" },
+            "completed": true
+        }))
+    }
+
+    fn directory_for_entry(
+        &self,
+        arguments: &DirectoryEntryArguments,
+    ) -> Result<&AuthorizedDirectory, RuntimeError> {
+        self.authorized_directories
+            .values()
+            .find(|directory| {
+                directory.validates_entry_reference(
+                    &arguments.target_reference_id,
+                    &arguments.relative_path,
+                )
+            })
+            .ok_or(crate::files::FileError::EntryReferenceInvalid.into())
+    }
+}
+
+fn directory_entry_input_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "targetReferenceId": {
+                "type": "string",
+                "description": "The opaque targetReferenceId returned for the entry."
+            },
+            "relativePath": {
+                "type": "string",
+                "description": "The matching relativePath returned with the target reference, used for a clear approval summary."
+            }
+        },
+        "required": ["targetReferenceId", "relativePath"],
+        "additionalProperties": false
+    })
 }
 
 #[derive(Deserialize)]
@@ -421,6 +533,23 @@ struct DirectorySearchArguments {
     query: String,
     #[serde(default)]
     kind: DirectorySearchKindArgument,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectoryEntryArguments {
+    target_reference_id: String,
+    relative_path: String,
+}
+
+fn parse_directory_entry_arguments(
+    name: &str,
+    arguments: &Value,
+) -> Result<DirectoryEntryArguments, RuntimeError> {
+    serde_json::from_value(arguments.clone()).map_err(|error| RuntimeError::InvalidToolArguments {
+        name: name.into(),
+        message: error.to_string(),
+    })
 }
 
 #[derive(Clone, Copy, Default, Deserialize)]

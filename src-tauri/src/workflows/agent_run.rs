@@ -72,6 +72,9 @@ pub(crate) async fn prepare(
     available_tools.remove("read_selected_text_file");
     available_tools.remove("list_selected_directory");
     available_tools.remove("search_selected_directory");
+    available_tools.remove("get_directory_entry_metadata");
+    available_tools.remove("open_directory_entry");
+    available_tools.remove("reveal_directory_entry");
     let mut resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
     let authorized_files = request
         .attachments
@@ -102,10 +105,19 @@ pub(crate) async fn prepare(
         resolved_skills
             .allowed_tools
             .insert("search_selected_directory".into());
+        resolved_skills
+            .allowed_tools
+            .insert("get_directory_entry_metadata".into());
+        resolved_skills
+            .allowed_tools
+            .insert("open_directory_entry".into());
+        resolved_skills
+            .allowed_tools
+            .insert("reveal_directory_entry".into());
         for directory in &authorized_directories {
             let reference = directory.reference();
             resolved_skills.instructions.push_str(&format!(
-                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect its direct children, or search_selected_directory with the same referenceId to search names recursively within the authorized scope. Never expose or invent a local path.",
+                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect direct children, or search_selected_directory with the same referenceId to search names recursively. Results include an opaque targetReferenceId and relativePath. Pass both unchanged to get_directory_entry_metadata, open_directory_entry, or reveal_directory_entry. Opening and revealing require user approval. Never expose or invent a local path.",
                 reference.name, reference.reference_id
             ));
         }

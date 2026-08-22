@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    fs::Metadata,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -27,6 +28,18 @@ pub(crate) struct AuthorizedDirectory {
     reference: DirectoryReference,
     selected_path: PathBuf,
     canonical_path: PathBuf,
+    entries: Arc<Mutex<HashMap<String, AuthorizedDirectoryEntry>>>,
+}
+
+#[derive(Debug, Clone)]
+struct AuthorizedDirectoryEntry {
+    reference_id: String,
+    directory_reference_id: String,
+    selected_root: PathBuf,
+    canonical_root: PathBuf,
+    selected_path: PathBuf,
+    name: String,
+    relative_path: String,
 }
 
 impl AuthorizedDirectory {
@@ -46,16 +59,29 @@ impl AuthorizedDirectory {
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             let metadata = tokio::fs::symlink_metadata(entry.path()).await?;
-            let (kind, size) = if metadata.file_type().is_symlink() {
-                ("symlink", None)
+            let (kind, size, target_reference_id) = if metadata.file_type().is_symlink() {
+                ("symlink", None, None)
             } else if metadata.is_dir() {
-                ("directory", None)
+                (
+                    "directory",
+                    None,
+                    Some(self.register_entry(entry.path(), PathBuf::from(&name), name.clone())),
+                )
             } else if metadata.is_file() {
-                ("file", Some(metadata.len()))
+                (
+                    "file",
+                    Some(metadata.len()),
+                    Some(self.register_entry(entry.path(), PathBuf::from(&name), name.clone())),
+                )
             } else {
-                ("other", None)
+                ("other", None, None)
             };
-            entries.push(DirectoryEntry { name, kind, size });
+            entries.push(DirectoryEntry {
+                name,
+                kind,
+                size,
+                target_reference_id,
+            });
         }
         entries.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(DirectoryListing { entries, truncated })
@@ -116,6 +142,11 @@ impl AuthorizedDirectory {
                         break;
                     }
                     entries.push(DirectorySearchEntry {
+                        target_reference_id: self.register_entry(
+                            child.path(),
+                            relative_path.clone(),
+                            name.clone(),
+                        ),
                         name,
                         relative_path: display_relative_path(&relative_path),
                         kind: entry_kind,
@@ -140,6 +171,126 @@ impl AuthorizedDirectory {
         }
         Ok(canonical_path)
     }
+
+    fn register_entry(
+        &self,
+        selected_path: PathBuf,
+        relative_path: PathBuf,
+        name: String,
+    ) -> String {
+        let relative_path = display_relative_path(&relative_path);
+        let mut entries = self.entries.lock().expect("directory entry registry lock");
+        if let Some(entry) = entries.values().find(|entry| {
+            entry.directory_reference_id == self.reference.reference_id
+                && entry.relative_path == relative_path
+        }) {
+            return entry.reference_id.clone();
+        }
+        let reference_id = Uuid::now_v7().to_string();
+        entries.insert(
+            reference_id.clone(),
+            AuthorizedDirectoryEntry {
+                reference_id: reference_id.clone(),
+                directory_reference_id: self.reference.reference_id.clone(),
+                selected_root: self.selected_path.clone(),
+                canonical_root: self.canonical_path.clone(),
+                selected_path,
+                name,
+                relative_path,
+            },
+        );
+        reference_id
+    }
+
+    pub(crate) fn validates_entry_reference(
+        &self,
+        reference_id: &str,
+        relative_path: &str,
+    ) -> bool {
+        self.entries
+            .lock()
+            .expect("directory entry registry lock")
+            .get(reference_id)
+            .is_some_and(|entry| {
+                entry.directory_reference_id == self.reference.reference_id
+                    && entry.relative_path == relative_path
+            })
+    }
+
+    pub(crate) async fn entry_metadata(
+        &self,
+        reference_id: &str,
+    ) -> Result<DirectoryEntryMetadata, FileError> {
+        let entry = self.entry(reference_id)?;
+        entry.metadata().await
+    }
+
+    pub(crate) async fn resolve_entry(&self, reference_id: &str) -> Result<PathBuf, FileError> {
+        let entry = self.entry(reference_id)?;
+        entry.resolve().await.map(|(path, _)| path)
+    }
+
+    fn entry(&self, reference_id: &str) -> Result<AuthorizedDirectoryEntry, FileError> {
+        self.entries
+            .lock()
+            .expect("directory entry registry lock")
+            .get(reference_id)
+            .filter(|entry| entry.directory_reference_id == self.reference.reference_id)
+            .cloned()
+            .ok_or(FileError::EntryReferenceInvalid)
+    }
+}
+
+impl AuthorizedDirectoryEntry {
+    async fn resolve(&self) -> Result<(PathBuf, Metadata), FileError> {
+        validate_directory_path(&self.selected_root).await?;
+        let canonical_root = tokio::fs::canonicalize(&self.selected_root).await?;
+        if canonical_root != self.canonical_root {
+            return Err(FileError::Changed);
+        }
+        let metadata = tokio::fs::symlink_metadata(&self.selected_path).await?;
+        if metadata.file_type().is_symlink() {
+            return Err(FileError::Symlink);
+        }
+        if !metadata.is_file() && !metadata.is_dir() {
+            return Err(FileError::EntryUnsupported);
+        }
+        let canonical_path = tokio::fs::canonicalize(&self.selected_path).await?;
+        if !canonical_path.starts_with(&canonical_root) {
+            return Err(FileError::EntryOutsideScope);
+        }
+        Ok((canonical_path, metadata))
+    }
+
+    async fn metadata(&self) -> Result<DirectoryEntryMetadata, FileError> {
+        let (_, metadata) = self.resolve().await?;
+        let kind = if metadata.is_dir() {
+            DirectorySearchKind::Directory
+        } else {
+            DirectorySearchKind::File
+        };
+        let modified_at = metadata.modified().ok().map(|modified| {
+            chrono::DateTime::<chrono::Utc>::from(modified)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        });
+        let extension = (kind == DirectorySearchKind::File)
+            .then(|| {
+                Path::new(&self.name)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_lowercase)
+            })
+            .flatten();
+        Ok(DirectoryEntryMetadata {
+            target_reference_id: self.reference_id.clone(),
+            name: self.name.clone(),
+            relative_path: self.relative_path.clone(),
+            kind,
+            size: (kind == DirectorySearchKind::File).then_some(metadata.len()),
+            modified_at,
+            extension,
+        })
+    }
 }
 
 fn display_relative_path(path: &Path) -> String {
@@ -161,6 +312,7 @@ pub(crate) struct DirectoryEntry {
     pub(crate) name: String,
     pub(crate) kind: &'static str,
     pub(crate) size: Option<u64>,
+    pub(crate) target_reference_id: Option<String>,
 }
 
 pub(crate) struct DirectorySearch {
@@ -169,10 +321,21 @@ pub(crate) struct DirectorySearch {
 }
 
 pub(crate) struct DirectorySearchEntry {
+    pub(crate) target_reference_id: String,
     pub(crate) name: String,
     pub(crate) relative_path: String,
     pub(crate) kind: DirectorySearchKind,
     pub(crate) size: Option<u64>,
+}
+
+pub(crate) struct DirectoryEntryMetadata {
+    pub(crate) target_reference_id: String,
+    pub(crate) name: String,
+    pub(crate) relative_path: String,
+    pub(crate) kind: DirectorySearchKind,
+    pub(crate) size: Option<u64>,
+    pub(crate) modified_at: Option<String>,
+    pub(crate) extension: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +382,7 @@ impl AuthorizedFile {
 #[derive(Clone, Default)]
 pub(crate) struct SelectedDirectories {
     directories: Arc<Mutex<HashMap<String, AuthorizedDirectory>>>,
+    entries: Arc<Mutex<HashMap<String, AuthorizedDirectoryEntry>>>,
 }
 
 impl SelectedDirectories {
@@ -227,6 +391,9 @@ impl SelectedDirectories {
         let canonical_path = tokio::fs::canonicalize(&path).await?;
         if canonical_path.parent().is_none() {
             return Err(FileError::DirectoryScopeTooBroad);
+        }
+        if is_sensitive_directory_scope(&canonical_path).await {
+            return Err(FileError::DirectoryScopeSensitive);
         }
         let name = path
             .file_name()
@@ -242,12 +409,17 @@ impl SelectedDirectories {
             reference: reference.clone(),
             selected_path: path,
             canonical_path,
+            entries: self.entries.clone(),
         };
         let mut directories = self
             .directories
             .lock()
             .expect("selected directory registry lock");
         directories.clear();
+        self.entries
+            .lock()
+            .expect("directory entry registry lock")
+            .clear();
         directories.insert(reference.reference_id.clone(), directory);
         Ok(reference)
     }
@@ -273,6 +445,21 @@ impl SelectedDirectories {
             .lock()
             .expect("selected directory registry lock")
             .remove(reference_id);
+        self.entries
+            .lock()
+            .expect("directory entry registry lock")
+            .retain(|_, entry| entry.directory_reference_id != reference_id);
+    }
+
+    pub(crate) async fn resolve_entry(&self, reference_id: &str) -> Result<PathBuf, FileError> {
+        let entry = self
+            .entries
+            .lock()
+            .expect("directory entry registry lock")
+            .get(reference_id)
+            .cloned()
+            .ok_or(FileError::EntryReferenceInvalid)?;
+        entry.resolve().await.map(|(path, _)| path)
     }
 }
 
@@ -355,6 +542,30 @@ async fn validate_directory_path(path: &Path) -> Result<(), FileError> {
     Ok(())
 }
 
+async fn is_sensitive_directory_scope(path: &Path) -> bool {
+    if let Some(home) = dirs::home_dir() {
+        if tokio::fs::canonicalize(home)
+            .await
+            .is_ok_and(|home| home == path)
+        {
+            return true;
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        for sensitive in ["/dev", "/etc", "/proc", "/sys"] {
+            if tokio::fs::canonicalize(sensitive)
+                .await
+                .is_ok_and(|sensitive| sensitive == path)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 async fn read_limited(path: &Path) -> Result<Vec<u8>, FileError> {
     let bytes = tokio::fs::read(path).await?;
     if bytes.len() as u64 > MAX_SELECTED_FILE_BYTES {
@@ -382,6 +593,8 @@ fn digest(bytes: &[u8]) -> String {
 pub enum FileError {
     #[error("selected file reference is invalid or has expired")]
     ReferenceInvalid,
+    #[error("directory entry reference is invalid or has expired")]
+    EntryReferenceInvalid,
     #[error("selected file name is invalid")]
     InvalidName,
     #[error("selected path must be a regular file")]
@@ -390,6 +603,12 @@ pub enum FileError {
     NotDirectory,
     #[error("filesystem roots cannot be authorized as directory scopes")]
     DirectoryScopeTooBroad,
+    #[error("home and system configuration roots cannot be authorized as directory scopes")]
+    DirectoryScopeSensitive,
+    #[error("directory entry is outside the authorized scope")]
+    EntryOutsideScope,
+    #[error("directory entry type is not supported")]
+    EntryUnsupported,
     #[error("symbolic links are not supported")]
     Symlink,
     #[error("selected file exceeds the 16 KiB size limit")]
@@ -400,6 +619,8 @@ pub enum FileError {
     NotText,
     #[error("selected file changed after it was authorized")]
     Changed,
+    #[error("system file action failed: {0}")]
+    SystemAction(String),
     #[error("file system access failed: {0}")]
     Io(String),
 }
@@ -408,15 +629,20 @@ impl FileError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::ReferenceInvalid => "file_reference_invalid",
+            Self::EntryReferenceInvalid => "directory_entry_reference_invalid",
             Self::InvalidName => "file_name_invalid",
             Self::NotRegularFile => "file_not_regular",
             Self::NotDirectory => "directory_not_found",
             Self::DirectoryScopeTooBroad => "directory_scope_too_broad",
+            Self::DirectoryScopeSensitive => "directory_scope_sensitive",
+            Self::EntryOutsideScope => "directory_entry_outside_scope",
+            Self::EntryUnsupported => "directory_entry_unsupported",
             Self::Symlink => "file_symlink_unsupported",
             Self::TooLarge => "file_too_large",
             Self::InvalidEncoding => "file_encoding_invalid",
             Self::NotText => "file_not_text",
             Self::Changed => "file_changed",
+            Self::SystemAction(_) => "file_system_action",
             Self::Io(_) => "file_io",
         }
     }
@@ -431,8 +657,9 @@ impl From<std::io::Error> for FileError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DirectorySearchKind, FileError, SelectedDirectories, SelectedFiles, MAX_DIRECTORY_ENTRIES,
-        MAX_DIRECTORY_SEARCH_RESULTS, MAX_SELECTED_FILE_BYTES,
+        is_sensitive_directory_scope, DirectorySearchKind, FileError, SelectedDirectories,
+        SelectedFiles, MAX_DIRECTORY_ENTRIES, MAX_DIRECTORY_SEARCH_RESULTS,
+        MAX_SELECTED_FILE_BYTES,
     };
 
     fn test_path(name: &str) -> std::path::PathBuf {
@@ -485,6 +712,15 @@ mod tests {
         tokio::fs::remove_file(invalid)
             .await
             .expect("remove invalid file");
+    }
+
+    #[tokio::test]
+    async fn treats_the_home_root_as_a_sensitive_directory_scope() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let home = tokio::fs::canonicalize(home).await.expect("canonical home");
+        assert!(is_sensitive_directory_scope(&home).await);
     }
 
     #[tokio::test]
@@ -604,6 +840,75 @@ mod tests {
             .expect("search directory");
         assert_eq!(search.entries.len(), MAX_DIRECTORY_SEARCH_RESULTS);
         assert!(search.truncated);
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn resolves_listed_entry_metadata_through_an_opaque_reference() {
+        let path = test_path("metadata-directory");
+        tokio::fs::create_dir(&path)
+            .await
+            .expect("create directory");
+        tokio::fs::write(path.join("Report.TXT"), "metadata")
+            .await
+            .expect("write file");
+        let directories = SelectedDirectories::default();
+        let directory_reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories
+            .take(&directory_reference)
+            .expect("take directory");
+        let listing = directory.list().await.expect("list directory");
+        let target_reference_id = listing.entries[0]
+            .target_reference_id
+            .as_deref()
+            .expect("entry target reference");
+
+        let metadata = directory
+            .entry_metadata(target_reference_id)
+            .await
+            .expect("entry metadata");
+        assert_eq!(metadata.name, "Report.TXT");
+        assert_eq!(metadata.relative_path, "Report.TXT");
+        assert_eq!(metadata.kind, DirectorySearchKind::File);
+        assert_eq!(metadata.size, Some(8));
+        assert_eq!(metadata.extension.as_deref(), Some("txt"));
+        assert!(metadata.modified_at.is_some());
+        assert_eq!(
+            directories
+                .resolve_entry(target_reference_id)
+                .await
+                .expect("resolve entry"),
+            tokio::fs::canonicalize(path.join("Report.TXT"))
+                .await
+                .expect("canonical file")
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let outside = test_path("outside.txt");
+            tokio::fs::write(&outside, "outside")
+                .await
+                .expect("write outside file");
+            tokio::fs::remove_file(path.join("Report.TXT"))
+                .await
+                .expect("remove authorized file");
+            symlink(&outside, path.join("Report.TXT")).expect("replace entry with symlink");
+            assert_eq!(
+                directories.resolve_entry(target_reference_id).await,
+                Err(FileError::Symlink)
+            );
+            tokio::fs::remove_file(outside)
+                .await
+                .expect("remove outside file");
+        }
 
         tokio::fs::remove_dir_all(path)
             .await

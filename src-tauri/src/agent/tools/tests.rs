@@ -171,7 +171,54 @@ async fn searches_an_authorized_directory_without_exposing_absolute_paths() {
     assert_eq!(result["query"], "REPORT");
     assert_eq!(result["kind"], "file");
     assert_eq!(result["entries"][0]["relativePath"], "nested/report.txt");
+    assert!(result["entries"][0]["targetReferenceId"].is_string());
     assert!(!result.to_string().contains(path.to_string_lossy().as_ref()));
+
+    let target_reference_id = result["entries"][0]["targetReferenceId"]
+        .as_str()
+        .expect("target reference");
+    let target_arguments = json!({
+        "targetReferenceId": target_reference_id,
+        "relativePath": "nested/report.txt"
+    });
+    let metadata = registry
+        .execute(
+            "get_directory_entry_metadata",
+            &target_arguments,
+            ExecutionAuthorization::NotRequired,
+        )
+        .await
+        .expect("read entry metadata");
+    assert_eq!(metadata["kind"], "file");
+    assert_eq!(metadata["size"], 12);
+    assert_eq!(metadata["extension"], "txt");
+    assert!(metadata["modifiedAt"].is_string());
+
+    registry
+        .validate("open_directory_entry", &target_arguments)
+        .expect("valid open target");
+    assert_eq!(
+        registry.validate(
+            "open_directory_entry",
+            &json!({
+                "targetReferenceId": target_reference_id,
+                "relativePath": "misleading-name.txt"
+            }),
+        ),
+        Err(RuntimeError::File(
+            crate::files::FileError::EntryReferenceInvalid
+        ))
+    );
+    assert!(matches!(
+        registry
+            .execute(
+                "open_directory_entry",
+                &target_arguments,
+                ExecutionAuthorization::NotRequired,
+            )
+            .await,
+        Err(RuntimeError::InvalidToolApproval(_))
+    ));
 
     tokio::fs::remove_dir_all(path)
         .await

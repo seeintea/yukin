@@ -72,6 +72,8 @@ pub fn run() {
             commands::file::file_reference_release,
             commands::file::directory_reference_select,
             commands::file::directory_reference_release,
+            commands::file::directory_entry_open,
+            commands::file::directory_entry_reveal,
             commands::model_provider::model_provider_preset_list,
             commands::model_provider::model_provider_create,
             commands::model_provider::model_provider_find,

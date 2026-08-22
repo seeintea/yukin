@@ -20,3 +20,9 @@ pub struct DirectoryReference {
     pub reference_id: String,
     pub name: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryEntryActionRequest {
+    pub target_reference_id: String,
+}
