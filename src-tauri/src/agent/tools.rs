@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use crate::files::{AuthorizedDirectory, AuthorizedFile, DirectorySearchKind};
+use crate::files::{
+    validate_created_text_file, AuthorizedDirectory, AuthorizedFile, DirectorySearchKind,
+};
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
 use super::{RuntimeError, ToolDefinition};
@@ -159,6 +161,29 @@ impl ToolRegistry {
                 }),
             },
             ToolDefinition {
+                name: "create_text_file_in_selected_directory".into(),
+                description: "Create a new UTF-8 .txt file at the root of a directory explicitly selected by the user. Existing files are never overwritten. This always requires user approval.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the selected directory."
+                        },
+                        "fileName": {
+                            "type": "string",
+                            "description": "A plain .txt file name without directories, for example notes.txt."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "UTF-8 text content, limited to 32 KiB."
+                        }
+                    },
+                    "required": ["referenceId", "fileName", "content"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
                 name: "get_directory_entry_metadata".into(),
                 description: "Get size, modification time, entry type, and file extension for an entry returned by list_selected_directory or search_selected_directory.".into(),
                 input_schema: directory_entry_input_schema(),
@@ -229,6 +254,9 @@ impl ToolRegistry {
             "list_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "search_selected_directory" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
             "get_directory_entry_metadata" => Ok((RiskLevel::ReadOnly, ApprovalPolicy::Never)),
+            "create_text_file_in_selected_directory" => {
+                Ok((RiskLevel::Write, ApprovalPolicy::Always))
+            }
             "open_directory_entry" | "reveal_directory_entry" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
@@ -261,6 +289,9 @@ impl ToolRegistry {
             "list_selected_directory" => self.list_selected_directory(arguments).await,
             "search_selected_directory" => self.search_selected_directory(arguments).await,
             "get_directory_entry_metadata" => self.directory_entry_metadata(arguments).await,
+            "create_text_file_in_selected_directory" => {
+                self.create_text_file_in_selected_directory(arguments).await
+            }
             "open_directory_entry" => self.directory_entry_action(name, arguments, false).await,
             "reveal_directory_entry" => self.directory_entry_action(name, arguments, true).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
@@ -332,6 +363,18 @@ impl ToolRegistry {
             "get_directory_entry_metadata" | "open_directory_entry" | "reveal_directory_entry" => {
                 let arguments = parse_directory_entry_arguments(name, arguments)?;
                 self.directory_for_entry(&arguments).map(|_| ())
+            }
+            "create_text_file_in_selected_directory" => {
+                let arguments = parse_create_text_file_arguments(name, arguments)?;
+                validate_created_text_file(&arguments.file_name, &arguments.content)?;
+                if self
+                    .authorized_directories
+                    .contains_key(&arguments.reference_id)
+                {
+                    Ok(())
+                } else {
+                    Err(crate::files::FileError::ReferenceInvalid.into())
+                }
             }
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
@@ -446,6 +489,30 @@ impl ToolRegistry {
         }))
     }
 
+    async fn create_text_file_in_selected_directory(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let arguments =
+            parse_create_text_file_arguments("create_text_file_in_selected_directory", arguments)?;
+        validate_created_text_file(&arguments.file_name, &arguments.content)?;
+        let directory = self
+            .authorized_directories
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let metadata = directory
+            .create_text_file(&arguments.file_name, &arguments.content)
+            .await?;
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "targetReferenceId": metadata.target_reference_id,
+            "fileName": metadata.name,
+            "relativePath": metadata.relative_path,
+            "size": metadata.size,
+            "created": true
+        }))
+    }
+
     async fn directory_entry_action(
         &self,
         name: &str,
@@ -540,6 +607,24 @@ struct DirectorySearchArguments {
 struct DirectoryEntryArguments {
     target_reference_id: String,
     relative_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateTextFileArguments {
+    reference_id: String,
+    file_name: String,
+    content: String,
+}
+
+fn parse_create_text_file_arguments(
+    name: &str,
+    arguments: &Value,
+) -> Result<CreateTextFileArguments, RuntimeError> {
+    serde_json::from_value(arguments.clone()).map_err(|error| RuntimeError::InvalidToolArguments {
+        name: name.into(),
+        message: error.to_string(),
+    })
 }
 
 fn parse_directory_entry_arguments(

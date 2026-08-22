@@ -193,6 +193,7 @@ function ToolCallCard({
             get_directory_entry_metadata: "读取文件元信息",
             open_directory_entry: "打开文件",
             reveal_directory_entry: "在系统中显示",
+            create_text_file_in_selected_directory: "创建文本文件",
           }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
@@ -213,6 +214,8 @@ function ToolCallCard({
             value={toolCall.result}
             action={toolCall.name === "open_directory_entry" ? "open" : "reveal"}
           />
+        ) : toolCall.name === "create_text_file_in_selected_directory" ? (
+          <CreateTextFileResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -236,7 +239,9 @@ function ToolCallCard({
                   ? "允许打开"
                   : toolCall.name === "reveal_directory_entry"
                     ? "允许显示"
-                    : "允许"}
+                    : toolCall.name === "create_text_file_in_selected_directory"
+                      ? "允许创建"
+                      : "允许"}
             </Button>
           </div>
         )}
@@ -445,6 +450,60 @@ function DirectoryEntryActionResult({
   );
 }
 
+function CreateTextFileResult({
+  argumentsValue,
+  value,
+}: {
+  argumentsValue: unknown;
+  value: unknown;
+}) {
+  const argumentsObject =
+    argumentsValue && typeof argumentsValue === "object"
+      ? (argumentsValue as { fileName?: unknown; content?: unknown })
+      : {};
+  const result =
+    value && typeof value === "object"
+      ? (value as {
+          directoryName?: unknown;
+          relativePath?: unknown;
+          size?: unknown;
+          targetReferenceId?: unknown;
+        })
+      : null;
+
+  if (result) {
+    const relativePath = String(result.relativePath ?? argumentsObject.fileName ?? "新建文件");
+    return (
+      <div className="space-y-2">
+        <p>
+          {typeof result.directoryName === "string" ? `${result.directoryName} · ` : ""}
+          已创建 {relativePath}
+          {typeof result.size === "number" ? ` · ${formatFileSize(result.size)}` : ""}
+        </p>
+        <DirectoryEntryRow
+          kind="file"
+          label={relativePath}
+          targetReferenceId={
+            typeof result.targetReferenceId === "string" ? result.targetReferenceId : null
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p>将在已授权目录根部创建 {String(argumentsObject.fileName ?? "新建文件")}</p>
+      <div>
+        <div className="mb-1 text-muted-foreground">内容预览</div>
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-2">
+          {String(argumentsObject.content ?? "")}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 function FileReadResult({ value }: { value: unknown }) {
   if (!value || typeof value !== "object") {
     return <p className="text-muted-foreground">正在读取已授权附件…</p>;
@@ -477,6 +536,9 @@ function formatToolError(code: string | null, fallback: string) {
       file_changed: "授权目录在操作前发生变化，请重新选择目录。",
       directory_entry_reference_invalid: "文件条目引用已失效，请重新列出或搜索目录。",
       file_system_action: "系统无法完成该文件操作。",
+      file_already_exists: "同名文件已存在，未执行覆盖。",
+      file_name_invalid: "文件名无效；只能在授权目录根部创建普通 .txt 文件。",
+      file_content_too_large: "文件内容超过 32 KiB 限制。",
     }[code ?? ""] ?? fallback
   );
 }

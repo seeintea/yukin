@@ -6,6 +6,7 @@ use std::{
 };
 
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::protocol::file::{DirectoryReference, Reference};
@@ -14,6 +15,7 @@ pub(crate) const MAX_SELECTED_FILE_BYTES: u64 = 16 * 1024;
 pub(crate) const MAX_DIRECTORY_ENTRIES: usize = 100;
 pub(crate) const MAX_DIRECTORY_SEARCH_DEPTH: usize = 4;
 pub(crate) const MAX_DIRECTORY_SEARCH_RESULTS: usize = 50;
+pub(crate) const MAX_CREATED_TEXT_FILE_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizedFile {
@@ -230,6 +232,50 @@ impl AuthorizedDirectory {
         entry.resolve().await.map(|(path, _)| path)
     }
 
+    pub(crate) async fn create_text_file(
+        &self,
+        file_name: &str,
+        content: &str,
+    ) -> Result<DirectoryEntryMetadata, FileError> {
+        validate_created_text_file(file_name, content)?;
+        let canonical_root = self.validate_root().await?;
+        let path = canonical_root.join(file_name);
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+            .map_err(map_create_error)?;
+        let write_result = async {
+            file.write_all(content.as_bytes()).await?;
+            file.flush().await
+        }
+        .await;
+        if let Err(error) = write_result {
+            drop(file);
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(FileError::Io(error.to_string()));
+        }
+        let modified_at = file.metadata().await.ok().and_then(|metadata| {
+            metadata.modified().ok().map(|modified| {
+                chrono::DateTime::<chrono::Utc>::from(modified)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            })
+        });
+        drop(file);
+        let target_reference_id =
+            self.register_entry(path, PathBuf::from(file_name), file_name.to_owned());
+        Ok(DirectoryEntryMetadata {
+            target_reference_id,
+            name: file_name.to_owned(),
+            relative_path: file_name.to_owned(),
+            kind: DirectorySearchKind::File,
+            size: Some(content.len() as u64),
+            modified_at,
+            extension: Some("txt".into()),
+        })
+    }
+
     fn entry(&self, reference_id: &str) -> Result<AuthorizedDirectoryEntry, FileError> {
         self.entries
             .lock()
@@ -328,6 +374,7 @@ pub(crate) struct DirectorySearchEntry {
     pub(crate) size: Option<u64>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct DirectoryEntryMetadata {
     pub(crate) target_reference_id: String,
     pub(crate) name: String,
@@ -542,6 +589,37 @@ async fn validate_directory_path(path: &Path) -> Result<(), FileError> {
     Ok(())
 }
 
+pub(crate) fn validate_created_text_file(file_name: &str, content: &str) -> Result<(), FileError> {
+    let path = Path::new(file_name);
+    let valid_name = !file_name.is_empty()
+        && file_name.len() <= 128
+        && file_name.trim() == file_name
+        && !file_name.starts_with('.')
+        && !file_name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+        && path.extension().and_then(|value| value.to_str()) == Some("txt")
+        && matches!(
+            path.components().collect::<Vec<_>>().as_slice(),
+            [std::path::Component::Normal(_)]
+        );
+    if !valid_name {
+        return Err(FileError::InvalidName);
+    }
+    if content.len() > MAX_CREATED_TEXT_FILE_BYTES {
+        return Err(FileError::CreatedTextTooLarge);
+    }
+    Ok(())
+}
+
+fn map_create_error(error: std::io::Error) -> FileError {
+    if error.kind() == std::io::ErrorKind::AlreadyExists {
+        FileError::AlreadyExists
+    } else {
+        FileError::Io(error.to_string())
+    }
+}
+
 async fn is_sensitive_directory_scope(path: &Path) -> bool {
     if let Some(home) = dirs::home_dir() {
         if tokio::fs::canonicalize(home)
@@ -597,6 +675,8 @@ pub enum FileError {
     EntryReferenceInvalid,
     #[error("selected file name is invalid")]
     InvalidName,
+    #[error("a file with the requested name already exists")]
+    AlreadyExists,
     #[error("selected path must be a regular file")]
     NotRegularFile,
     #[error("selected path must be a directory")]
@@ -613,6 +693,8 @@ pub enum FileError {
     Symlink,
     #[error("selected file exceeds the 16 KiB size limit")]
     TooLarge,
+    #[error("text file content exceeds the 32 KiB size limit")]
+    CreatedTextTooLarge,
     #[error("selected file is not valid UTF-8")]
     InvalidEncoding,
     #[error("selected file contains non-text control characters")]
@@ -631,6 +713,7 @@ impl FileError {
             Self::ReferenceInvalid => "file_reference_invalid",
             Self::EntryReferenceInvalid => "directory_entry_reference_invalid",
             Self::InvalidName => "file_name_invalid",
+            Self::AlreadyExists => "file_already_exists",
             Self::NotRegularFile => "file_not_regular",
             Self::NotDirectory => "directory_not_found",
             Self::DirectoryScopeTooBroad => "directory_scope_too_broad",
@@ -639,6 +722,7 @@ impl FileError {
             Self::EntryUnsupported => "directory_entry_unsupported",
             Self::Symlink => "file_symlink_unsupported",
             Self::TooLarge => "file_too_large",
+            Self::CreatedTextTooLarge => "file_content_too_large",
             Self::InvalidEncoding => "file_encoding_invalid",
             Self::NotText => "file_not_text",
             Self::Changed => "file_changed",
@@ -658,8 +742,8 @@ impl From<std::io::Error> for FileError {
 mod tests {
     use super::{
         is_sensitive_directory_scope, DirectorySearchKind, FileError, SelectedDirectories,
-        SelectedFiles, MAX_DIRECTORY_ENTRIES, MAX_DIRECTORY_SEARCH_RESULTS,
-        MAX_SELECTED_FILE_BYTES,
+        SelectedFiles, MAX_CREATED_TEXT_FILE_BYTES, MAX_DIRECTORY_ENTRIES,
+        MAX_DIRECTORY_SEARCH_RESULTS, MAX_SELECTED_FILE_BYTES,
     };
 
     fn test_path(name: &str) -> std::path::PathBuf {
@@ -910,6 +994,67 @@ mod tests {
                 .expect("remove outside file");
         }
 
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn creates_a_new_text_file_without_overwriting_or_escaping_scope() {
+        let path = test_path("create-text-directory");
+        tokio::fs::create_dir(&path)
+            .await
+            .expect("create directory");
+        let directories = SelectedDirectories::default();
+        let directory_reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories
+            .take(&directory_reference)
+            .expect("take directory");
+
+        let metadata = directory
+            .create_text_file("notes.txt", "安全内容")
+            .await
+            .expect("create text file");
+        assert_eq!(metadata.relative_path, "notes.txt");
+        assert_eq!(metadata.size, Some("安全内容".len() as u64));
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("notes.txt"))
+                .await
+                .expect("read created file"),
+            "安全内容"
+        );
+        assert_eq!(
+            directory.create_text_file("notes.txt", "覆盖内容").await,
+            Err(FileError::AlreadyExists)
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("notes.txt"))
+                .await
+                .expect("read unchanged file"),
+            "安全内容"
+        );
+
+        for invalid_name in [
+            "../escape.txt",
+            "nested/file.txt",
+            "nested\\file.txt",
+            ".hidden.txt",
+            "notes.md",
+        ] {
+            assert_eq!(
+                directory.create_text_file(invalid_name, "text").await,
+                Err(FileError::InvalidName)
+            );
+        }
+        assert_eq!(
+            directory
+                .create_text_file("large.txt", &"a".repeat(MAX_CREATED_TEXT_FILE_BYTES + 1))
+                .await,
+            Err(FileError::CreatedTextTooLarge)
+        );
         tokio::fs::remove_dir_all(path)
             .await
             .expect("remove directory");

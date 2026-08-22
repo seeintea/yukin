@@ -91,6 +91,20 @@ fn rejects_a_directory_reference_that_was_not_attached_to_the_run() {
             crate::files::FileError::ReferenceInvalid
         ))
     );
+
+    assert_eq!(
+        ToolRegistry::built_in(PathBuf::new()).validate(
+            "create_text_file_in_selected_directory",
+            &json!({
+                "referenceId": "not-authorized",
+                "fileName": "notes.txt",
+                "content": "text"
+            }),
+        ),
+        Err(RuntimeError::File(
+            crate::files::FileError::ReferenceInvalid
+        ))
+    );
 }
 
 #[test]
@@ -219,6 +233,80 @@ async fn searches_an_authorized_directory_without_exposing_absolute_paths() {
             .await,
         Err(RuntimeError::InvalidToolApproval(_))
     ));
+
+    tokio::fs::remove_dir_all(path)
+        .await
+        .expect("remove selected directory");
+}
+
+#[tokio::test]
+async fn creates_a_text_file_in_an_authorized_directory_only_after_approval() {
+    let path = std::env::temp_dir().join(format!(
+        "yukin-create-text-tool-test-{}",
+        uuid::Uuid::now_v7()
+    ));
+    tokio::fs::create_dir(&path)
+        .await
+        .expect("create selected directory");
+    let directories = SelectedDirectories::default();
+    let reference = directories
+        .register(path.clone())
+        .await
+        .expect("register directory");
+    let directory = directories.take(&reference).expect("take reference");
+    let registry = ToolRegistry::with_authorizations(PathBuf::new(), Vec::new(), vec![directory]);
+    let arguments = json!({
+        "referenceId": reference.reference_id,
+        "fileName": "created.txt",
+        "content": "private created content"
+    });
+
+    assert!(matches!(
+        registry
+            .execute(
+                "create_text_file_in_selected_directory",
+                &arguments,
+                ExecutionAuthorization::NotRequired,
+            )
+            .await,
+        Err(RuntimeError::InvalidToolApproval(_))
+    ));
+    assert!(!path.join("created.txt").exists());
+
+    let result = registry
+        .execute(
+            "create_text_file_in_selected_directory",
+            &arguments,
+            ExecutionAuthorization::Approved {
+                arguments_digest: arguments_digest(&arguments).expect("arguments digest").1,
+            },
+        )
+        .await
+        .expect("create approved text file");
+    assert_eq!(result["fileName"], "created.txt");
+    assert_eq!(result["created"], true);
+    assert!(result["targetReferenceId"].is_string());
+    assert!(!result.to_string().contains("private created content"));
+    assert!(!result.to_string().contains(path.to_string_lossy().as_ref()));
+    assert_eq!(
+        tokio::fs::read_to_string(path.join("created.txt"))
+            .await
+            .expect("read created file"),
+        "private created content"
+    );
+
+    assert_eq!(
+        registry
+            .execute(
+                "create_text_file_in_selected_directory",
+                &arguments,
+                ExecutionAuthorization::Approved {
+                    arguments_digest: arguments_digest(&arguments).expect("arguments digest").1,
+                },
+            )
+            .await,
+        Err(RuntimeError::File(crate::files::FileError::AlreadyExists))
+    );
 
     tokio::fs::remove_dir_all(path)
         .await
