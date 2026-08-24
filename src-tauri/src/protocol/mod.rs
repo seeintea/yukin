@@ -3,5 +3,7 @@ pub mod common;
 pub mod conversation;
 pub mod diagnostics;
 pub mod file;
+pub mod imported_skill;
+pub mod mcp_server;
 pub mod model_provider;
 pub mod skill;

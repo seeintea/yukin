@@ -1,5 +1,11 @@
-import { Link, Outlet } from "@tanstack/react-router";
-import { ChevronLeftIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import {
+  BlocksIcon,
+  BookOpenIcon,
+  ChevronLeftIcon,
+  SettingsIcon,
+  WaypointsIcon,
+} from "lucide-react";
 
 import {
   Sidebar,
@@ -17,6 +23,8 @@ import {
 } from "#/shadcn/sidebar";
 
 export function Settings() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+
   return (
     <SidebarProvider className="h-full min-h-0 overflow-hidden">
       <Sidebar collapsible="none">
@@ -36,9 +44,37 @@ export function Settings() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton isActive render={<Link to="/settings/providers" />}>
+                  <SidebarMenuButton
+                    isActive={pathname === "/settings/providers"}
+                    render={<Link to="/settings/providers" />}
+                  >
                     <WaypointsIcon />
                     <span>模型供应商</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+          <SidebarGroup>
+            <SidebarGroupLabel>扩展</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === "/settings/skills"}
+                    render={<Link to="/settings/skills" />}
+                  >
+                    <BookOpenIcon />
+                    <span>Skills</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname === "/settings/mcp-servers"}
+                    render={<Link to="/settings/mcp-servers" />}
+                  >
+                    <BlocksIcon />
+                    <span>MCP Servers</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
