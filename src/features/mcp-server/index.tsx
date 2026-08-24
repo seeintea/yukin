@@ -1,10 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeIcon, MoreHorizontalIcon, PackageOpenIcon, PowerIcon, Trash2Icon } from "lucide-react";
+import {
+  EyeIcon,
+  FolderOpenIcon,
+  MoreHorizontalIcon,
+  PackageOpenIcon,
+  PowerIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useState } from "react";
 
 import {
   mcpServerDelete,
-  mcpServerImport,
+  mcpServerImportArchive,
+  mcpServerImportDirectory,
   mcpServerList,
   mcpServerSetEnabled,
 } from "#/api/mcp-server";
@@ -58,8 +66,17 @@ export function McpServerSettings() {
   const [viewingServer, setViewingServer] = useState<McpServer | null>(null);
   const [deletingServer, setDeletingServer] = useState<McpServer | null>(null);
 
-  const importMutation = useMutation({
-    mutationFn: mcpServerImport,
+  const archiveMutation = useMutation({
+    mutationFn: mcpServerImportArchive,
+    onSuccess: (server) => {
+      if (!server) return;
+      queryClient.setQueryData<McpServer[]>(listKey, (servers = []) => upsert(servers, server));
+      toast.add({ title: "MCP Server 导入成功", type: "success" });
+    },
+    onError: (error) => showErrorToast("MCP Server 导入失败", error),
+  });
+  const directoryMutation = useMutation({
+    mutationFn: mcpServerImportDirectory,
     onSuccess: (server) => {
       if (!server) return;
       queryClient.setQueryData<McpServer[]>(listKey, (servers = []) => upsert(servers, server));
@@ -94,13 +111,23 @@ export function McpServerSettings() {
           <div>
             <h1 className="text-2xl font-semibold">MCP Servers</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              导入本地 MCPB 并管理托管副本。当前不会启动 Server、安装依赖或发现动态 Tool。
+              直接导入 MCP ZIP、MCPB 或已解压文件夹。当前不会启动 Server、安装依赖或发现动态 Tool。
             </p>
           </div>
-          <Button disabled={importMutation.isPending} onClick={() => importMutation.mutate()}>
-            <PackageOpenIcon />
-            {importMutation.isPending ? "正在导入" : "导入 MCPB"}
-          </Button>
+          <div className="flex gap-2">
+            <Button disabled={archiveMutation.isPending} onClick={() => archiveMutation.mutate()}>
+              <PackageOpenIcon />
+              {archiveMutation.isPending ? "正在导入" : "导入 ZIP / MCPB"}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={directoryMutation.isPending}
+              onClick={() => directoryMutation.mutate()}
+            >
+              <FolderOpenIcon />
+              {directoryMutation.isPending ? "正在导入" : "导入文件夹"}
+            </Button>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-xl border bg-card">
@@ -108,6 +135,7 @@ export function McpServerSettings() {
             <TableHeader>
               <TableRow>
                 <TableHead>Server</TableHead>
+                <TableHead>来源</TableHead>
                 <TableHead>运行时</TableHead>
                 <TableHead>声明 Tool</TableHead>
                 <TableHead>状态</TableHead>
@@ -118,21 +146,21 @@ export function McpServerSettings() {
               {serversQuery.isPending ? (
                 Array.from({ length: 3 }, (_, index) => (
                   <TableRow key={index}>
-                    <TableCell colSpan={5}>
+                    <TableCell colSpan={6}>
                       <Skeleton className="h-10 w-full" />
                     </TableCell>
                   </TableRow>
                 ))
               ) : serversQuery.isError ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                     MCP Server 加载失败
                   </TableCell>
                 </TableRow>
               ) : servers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                    尚未导入 MCPB
+                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                    尚未添加 MCP Server
                   </TableCell>
                 </TableRow>
               ) : (
@@ -144,6 +172,7 @@ export function McpServerSettings() {
                         {server.name} · v{server.version} · {server.authorName}
                       </div>
                     </TableCell>
+                    <TableCell>{server.sourceKind === "bundle" ? "MCPB" : "命令配置"}</TableCell>
                     <TableCell>{typeLabels[server.serverType]}</TableCell>
                     <TableCell>
                       {server.declaredTools.length > 0 ? server.declaredTools.length : "接入后发现"}
@@ -212,7 +241,25 @@ export function McpServerSettings() {
                 <Detail label="版本" value={viewingServer.version} />
                 <Detail label="作者" value={viewingServer.authorName} />
                 <Detail label="运行时" value={typeLabels[viewingServer.serverType]} />
+                <Detail
+                  label="来源"
+                  value={viewingServer.sourceKind === "bundle" ? "MCPB" : "命令配置"}
+                />
               </div>
+              {viewingServer.sourceKind === "command" && viewingServer.command && (
+                <>
+                  <Separator />
+                  <section>
+                    <h3 className="mb-2 font-medium">启动配置</h3>
+                    <code className="block overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs">
+                      {[viewingServer.command, ...viewingServer.args].join(" ")}
+                    </code>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      仅保存配置；启用后仍需等待 Agent Runtime 接入才会实际启动。
+                    </p>
+                  </section>
+                </>
+              )}
               <Separator />
               <section>
                 <h3 className="mb-2 font-medium">声明的 Tools</h3>
@@ -273,8 +320,9 @@ export function McpServerSettings() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除 MCP Server？</AlertDialogTitle>
             <AlertDialogDescription>
-              将删除“{deletingServer?.displayName ?? deletingServer?.name}
-              ”的记录和托管副本，不会影响最初下载的 MCPB。
+              {deletingServer?.sourceKind === "bundle"
+                ? `将删除“${deletingServer.displayName ?? deletingServer.name}”的记录和托管副本，不会影响最初下载的 MCPB。`
+                : `将删除“${deletingServer?.displayName ?? deletingServer?.name}”的命令配置和托管副本，不会影响原始 ZIP 或文件夹。`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

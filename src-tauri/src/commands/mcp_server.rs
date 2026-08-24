@@ -9,13 +9,23 @@ use crate::{
 };
 
 #[tauri::command]
-pub async fn mcp_server_import(
+pub async fn mcp_server_import_archive(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Option<McpServer>> {
-    mcp_server_workflow::import(app, state.db())
+    mcp_server_workflow::import_archive(app, state.db())
         .await
-        .log_error("mcp_server_import")
+        .log_error("mcp_server_import_archive")
+}
+
+#[tauri::command]
+pub async fn mcp_server_import_directory(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Option<McpServer>> {
+    mcp_server_workflow::import_directory(app, state.db())
+        .await
+        .log_error("mcp_server_import_directory")
 }
 
 #[tauri::command]

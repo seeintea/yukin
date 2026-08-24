@@ -12,11 +12,33 @@ pub struct McpServer {
     pub description: String,
     pub author_name: String,
     pub server_type: ServerType,
+    pub source_kind: SourceKind,
+    pub command: Option<String>,
+    pub args: Vec<String>,
     pub enabled: bool,
     pub declared_tools: Vec<DeclaredTool>,
     pub config_fields: Vec<ConfigField>,
     #[serde(flatten)]
     pub metadata: RecordMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceKind {
+    Bundle,
+    Command,
+}
+
+impl TryFrom<String> for SourceKind {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "bundle" => Ok(Self::Bundle),
+            "command" => Ok(Self::Command),
+            _ => Err(format!("unsupported MCP source kind: {value}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

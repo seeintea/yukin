@@ -2,8 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { DeleteRequest, McpServer, SetEnabledRequest } from "#/protocol/mcp-server";
 
-export function mcpServerImport(): Promise<McpServer | null> {
-  return invoke("mcp_server_import");
+export function mcpServerImportArchive(): Promise<McpServer | null> {
+  return invoke("mcp_server_import_archive");
+}
+
+export function mcpServerImportDirectory(): Promise<McpServer | null> {
+  return invoke("mcp_server_import_directory");
 }
 
 export function mcpServerList(): Promise<McpServer[]> {

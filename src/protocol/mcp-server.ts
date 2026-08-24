@@ -1,6 +1,7 @@
 import type { RecordMetadata } from "#/protocol/common";
 
 export type McpServerType = "node" | "python" | "binary" | "uv";
+export type McpServerSourceKind = "bundle" | "command";
 
 export interface DeclaredTool {
   name: string;
@@ -24,6 +25,9 @@ export interface McpServer extends RecordMetadata {
   description: string;
   authorName: string;
   serverType: McpServerType;
+  sourceKind: McpServerSourceKind;
+  command: string | null;
+  args: string[];
   enabled: boolean;
   declaredTools: DeclaredTool[];
   configFields: McpConfigField[];
