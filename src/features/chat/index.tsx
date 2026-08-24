@@ -195,6 +195,7 @@ function ToolCallCard({
             reveal_directory_entry: "在系统中显示",
             create_text_file_in_selected_directory: "创建文本文件",
             create_directory_in_selected_directory: "创建目录",
+            copy_directory_entry: "复制文件或目录",
           }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
@@ -219,6 +220,8 @@ function ToolCallCard({
           <CreateTextFileResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : toolCall.name === "create_directory_in_selected_directory" ? (
           <CreateDirectoryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
+        ) : toolCall.name === "copy_directory_entry" ? (
+          <CopyDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -246,7 +249,9 @@ function ToolCallCard({
                       ? "允许创建"
                       : toolCall.name === "create_directory_in_selected_directory"
                         ? "允许创建"
-                        : "允许"}
+                        : toolCall.name === "copy_directory_entry"
+                          ? "允许复制"
+                          : "允许"}
             </Button>
           </div>
         )}
@@ -551,6 +556,72 @@ function CreateDirectoryResult({
   );
 }
 
+function CopyDirectoryEntryResult({
+  argumentsValue,
+  value,
+}: {
+  argumentsValue: unknown;
+  value: unknown;
+}) {
+  const argumentsObject =
+    argumentsValue && typeof argumentsValue === "object"
+      ? (argumentsValue as {
+          sourceRelativePath?: unknown;
+          destinationDirectoryRelativePath?: unknown;
+          destinationName?: unknown;
+        })
+      : {};
+  const result =
+    value && typeof value === "object"
+      ? (value as {
+          directoryName?: unknown;
+          relativePath?: unknown;
+          targetReferenceId?: unknown;
+          kind?: unknown;
+          copiedEntries?: unknown;
+          copiedBytes?: unknown;
+        })
+      : null;
+
+  if (!result) {
+    const destination =
+      typeof argumentsObject.destinationDirectoryRelativePath === "string"
+        ? argumentsObject.destinationDirectoryRelativePath
+        : "已授权目录根部";
+    return (
+      <div className="space-y-1">
+        <p>来源：{String(argumentsObject.sourceRelativePath ?? "已授权条目")}</p>
+        <p>
+          目标：{destination} / {String(argumentsObject.destinationName ?? "副本")}
+        </p>
+        <p className="text-muted-foreground">
+          不会覆盖同名条目；目录复制受条目数、深度和总大小限制。
+        </p>
+      </div>
+    );
+  }
+
+  const relativePath = String(result.relativePath ?? argumentsObject.destinationName ?? "副本");
+  const kind = result.kind === "directory" ? "directory" : "file";
+  return (
+    <div className="space-y-2">
+      <p>
+        {typeof result.directoryName === "string" ? `${result.directoryName} · ` : ""}
+        已复制到 {relativePath}
+        {typeof result.copiedEntries === "number" ? ` · ${result.copiedEntries} 个条目` : ""}
+        {typeof result.copiedBytes === "number" ? ` · ${formatFileSize(result.copiedBytes)}` : ""}
+      </p>
+      <DirectoryEntryRow
+        kind={kind}
+        label={relativePath}
+        targetReferenceId={
+          typeof result.targetReferenceId === "string" ? result.targetReferenceId : null
+        }
+      />
+    </div>
+  );
+}
+
 function FileReadResult({ value }: { value: unknown }) {
   if (!value || typeof value !== "object") {
     return <p className="text-muted-foreground">正在读取已授权附件…</p>;
@@ -587,6 +658,9 @@ function formatToolError(code: string | null, fallback: string) {
       file_name_invalid: "文件名无效；只能在授权目录根部创建普通 .txt 文件。",
       file_content_too_large: "文件内容超过 32 KiB 限制。",
       directory_name_invalid: "目录名无效；只能在授权目录根部创建单个普通目录。",
+      file_copy_destination_invalid: "副本名称无效；请输入不含路径分隔符的普通名称。",
+      file_copy_limit_exceeded: "复制范围超过 100 个条目、8 层目录或 16 MiB 限制。",
+      file_copy_into_source: "不能把目录复制到自身或其子目录中。",
     }[code ?? ""] ?? fallback
   );
 }

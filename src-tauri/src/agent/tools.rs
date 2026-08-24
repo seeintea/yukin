@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use crate::files::{
-    validate_created_directory, validate_created_text_file, AuthorizedDirectory, AuthorizedFile,
-    DirectorySearchKind,
+    validate_copy_destination_name, validate_created_directory, validate_created_text_file,
+    AuthorizedDirectory, AuthorizedFile, DirectorySearchKind,
 };
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
@@ -204,6 +204,41 @@ impl ToolRegistry {
                 }),
             },
             ToolDefinition {
+                name: "copy_directory_entry".into(),
+                description: "Copy one previously listed or searched file or directory within the same user-authorized directory. The destination may be the selected root or a previously listed or searched directory. Existing entries are never overwritten. Copies are limited to 100 entries, 8 levels, and 16 MiB, and always require user approval.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the selected directory."
+                        },
+                        "sourceTargetReferenceId": {
+                            "type": "string",
+                            "description": "The opaque targetReferenceId of the source entry."
+                        },
+                        "sourceRelativePath": {
+                            "type": "string",
+                            "description": "The matching source relativePath returned with the source reference."
+                        },
+                        "destinationDirectoryTargetReferenceId": {
+                            "type": "string",
+                            "description": "Optional opaque targetReferenceId of a destination directory. Omit to use the selected root."
+                        },
+                        "destinationDirectoryRelativePath": {
+                            "type": "string",
+                            "description": "Required matching relativePath when a destination directory reference is supplied."
+                        },
+                        "destinationName": {
+                            "type": "string",
+                            "description": "A plain file or directory name for the copy, without path separators."
+                        }
+                    },
+                    "required": ["referenceId", "sourceTargetReferenceId", "sourceRelativePath", "destinationName"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
                 name: "get_directory_entry_metadata".into(),
                 description: "Get size, modification time, entry type, and file extension for an entry returned by list_selected_directory or search_selected_directory.".into(),
                 input_schema: directory_entry_input_schema(),
@@ -280,6 +315,7 @@ impl ToolRegistry {
             "create_directory_in_selected_directory" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
+            "copy_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "open_directory_entry" | "reveal_directory_entry" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
@@ -318,6 +354,7 @@ impl ToolRegistry {
             "create_directory_in_selected_directory" => {
                 self.create_directory_in_selected_directory(arguments).await
             }
+            "copy_directory_entry" => self.copy_directory_entry(arguments).await,
             "open_directory_entry" => self.directory_entry_action(name, arguments, false).await,
             "reveal_directory_entry" => self.directory_entry_action(name, arguments, true).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
@@ -412,6 +449,32 @@ impl ToolRegistry {
                     Ok(())
                 } else {
                     Err(crate::files::FileError::ReferenceInvalid.into())
+                }
+            }
+            "copy_directory_entry" => {
+                let arguments = parse_copy_directory_entry_arguments(name, arguments)?;
+                validate_copy_destination_name(&arguments.destination_name)?;
+                let directory = self
+                    .authorized_directories
+                    .get(&arguments.reference_id)
+                    .ok_or(crate::files::FileError::ReferenceInvalid)?;
+                if !directory.validates_entry_reference(
+                    &arguments.source_target_reference_id,
+                    &arguments.source_relative_path,
+                ) {
+                    return Err(crate::files::FileError::EntryReferenceInvalid.into());
+                }
+                match (
+                    &arguments.destination_directory_target_reference_id,
+                    &arguments.destination_directory_relative_path,
+                ) {
+                    (None, None) => Ok(()),
+                    (Some(reference_id), Some(relative_path))
+                        if directory.validates_entry_reference(reference_id, relative_path) =>
+                    {
+                        Ok(())
+                    }
+                    _ => Err(crate::files::FileError::EntryReferenceInvalid.into()),
                 }
             }
             _ => Err(RuntimeError::ToolNotFound(name.into())),
@@ -574,6 +637,35 @@ impl ToolRegistry {
         }))
     }
 
+    async fn copy_directory_entry(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments = parse_copy_directory_entry_arguments("copy_directory_entry", arguments)?;
+        validate_copy_destination_name(&arguments.destination_name)?;
+        let directory = self
+            .authorized_directories
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let result = directory
+            .copy_entry(
+                &arguments.source_target_reference_id,
+                arguments
+                    .destination_directory_target_reference_id
+                    .as_deref(),
+                &arguments.destination_name,
+            )
+            .await?;
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "targetReferenceId": result.metadata.target_reference_id,
+            "name": result.metadata.name,
+            "relativePath": result.metadata.relative_path,
+            "kind": result.metadata.kind.as_str(),
+            "size": result.metadata.size,
+            "copiedEntries": result.copied_entries,
+            "copiedBytes": result.copied_bytes,
+            "copied": true
+        }))
+    }
+
     async fn directory_entry_action(
         &self,
         name: &str,
@@ -683,6 +775,27 @@ struct CreateTextFileArguments {
 struct CreateDirectoryArguments {
     reference_id: String,
     directory_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CopyDirectoryEntryArguments {
+    reference_id: String,
+    source_target_reference_id: String,
+    source_relative_path: String,
+    destination_directory_target_reference_id: Option<String>,
+    destination_directory_relative_path: Option<String>,
+    destination_name: String,
+}
+
+fn parse_copy_directory_entry_arguments(
+    name: &str,
+    arguments: &Value,
+) -> Result<CopyDirectoryEntryArguments, RuntimeError> {
+    serde_json::from_value(arguments.clone()).map_err(|error| RuntimeError::InvalidToolArguments {
+        name: name.into(),
+        message: error.to_string(),
+    })
 }
 
 fn parse_create_directory_arguments(
