@@ -80,6 +80,7 @@ pub(crate) async fn prepare(
     available_tools.remove("copy_directory_entry");
     available_tools.remove("move_directory_entry");
     available_tools.remove("trash_directory_entry");
+    available_tools.remove("batch_move_directory_entries");
     let mut resolved_skills = SkillRegistry::resolve(&request.skill_ids, &available_tools)?;
     let authorized_files = request
         .attachments
@@ -134,10 +135,13 @@ pub(crate) async fn prepare(
         resolved_skills
             .allowed_tools
             .insert("trash_directory_entry".into());
+        resolved_skills
+            .allowed_tools
+            .insert("batch_move_directory_entries".into());
         for directory in &authorized_directories {
             let reference = directory.reference();
             resolved_skills.instructions.push_str(&format!(
-                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect direct children or search_selected_directory with the same referenceId to search names recursively. Use create_text_file_in_selected_directory to create a new .txt file or create_directory_in_selected_directory to create a child directory at this authorized root. Use copy_directory_entry or move_directory_entry for one listed or searched entry within this authorized directory; pass source and optional destination directory targetReferenceId and relativePath pairs unchanged. Use trash_directory_entry only to move one referenced entry to the system trash; permanent deletion is unavailable. Results include an opaque targetReferenceId and relativePath. Pass both unchanged to get_directory_entry_metadata, open_directory_entry, or reveal_directory_entry. Creating, copying, moving, trashing, opening, and revealing require user approval. Never expose or invent a local path.",
+                "\n\nThe user authorized the directory {:?}. Call list_selected_directory with referenceId {:?} to inspect direct children or search_selected_directory with the same referenceId to search names recursively. Use create_text_file_in_selected_directory to create a new .txt file or create_directory_in_selected_directory to create a child directory at this authorized root. Use copy_directory_entry or move_directory_entry for one listed or searched entry within this authorized directory; pass source and optional destination directory targetReferenceId and relativePath pairs unchanged. Use batch_move_directory_entries for up to 20 independent moves or renames and choose fail or skip for target conflicts. Use trash_directory_entry only to move one referenced entry to the system trash; permanent deletion is unavailable. Results include an opaque targetReferenceId and relativePath. Pass both unchanged to get_directory_entry_metadata, open_directory_entry, or reveal_directory_entry. Creating, copying, moving, trashing, opening, and revealing require user approval. Never expose or invent a local path.",
                 reference.name, reference.reference_id
             ));
         }

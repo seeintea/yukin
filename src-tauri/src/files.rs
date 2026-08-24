@@ -19,6 +19,7 @@ pub(crate) const MAX_CREATED_TEXT_FILE_BYTES: usize = 32 * 1024;
 pub(crate) const MAX_COPY_ENTRIES: usize = 100;
 pub(crate) const MAX_COPY_DEPTH: usize = 8;
 pub(crate) const MAX_COPY_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_BATCH_MOVE_ENTRIES: usize = 20;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AuthorizedFile {
@@ -523,6 +524,165 @@ impl AuthorizedDirectory {
         })
     }
 
+    pub(crate) async fn move_entries(
+        &self,
+        requests: &[BatchMoveEntryRequest],
+        conflict_strategy: BatchMoveConflictStrategy,
+    ) -> Result<BatchMoveResult, FileError> {
+        if requests.is_empty() || requests.len() > MAX_BATCH_MOVE_ENTRIES {
+            return Err(FileError::BatchMoveInvalid);
+        }
+        let canonical_root = self.validate_root().await?;
+        let mut plans = Vec::with_capacity(requests.len());
+        for request in requests {
+            validate_move_destination_name(&request.destination_name)?;
+            if plans
+                .iter()
+                .any(|plan: &BatchMovePlan| plan.source.reference_id == request.source_reference_id)
+            {
+                return Err(FileError::BatchMoveInvalid);
+            }
+            let source = self.entry(&request.source_reference_id)?;
+            let (source_path, source_metadata) = source.resolve().await?;
+            let (destination_directory, destination_relative_directory) =
+                if let Some(reference_id) = request.destination_directory_reference_id.as_deref() {
+                    let destination = self.entry(reference_id)?;
+                    let (path, metadata) = destination.resolve().await?;
+                    if !metadata.is_dir() {
+                        return Err(FileError::NotDirectory);
+                    }
+                    (path, PathBuf::from(destination.relative_path))
+                } else {
+                    (canonical_root.clone(), PathBuf::new())
+                };
+            if source_metadata.is_dir() && destination_directory.starts_with(&source_path) {
+                return Err(FileError::MoveIntoSource);
+            }
+            let destination_path = destination_directory.join(&request.destination_name);
+            if destination_path == source_path {
+                return Err(FileError::AlreadyExists);
+            }
+            let destination_relative_path =
+                destination_relative_directory.join(&request.destination_name);
+            plans.push(BatchMovePlan {
+                source,
+                source_path,
+                source_metadata,
+                destination_directory,
+                destination_path,
+                destination_relative_path,
+                destination_name: request.destination_name.clone(),
+                conflict: false,
+            });
+        }
+
+        for left_index in 0..plans.len() {
+            for right_index in (left_index + 1)..plans.len() {
+                let left = &plans[left_index];
+                let right = &plans[right_index];
+                if left.source_path.starts_with(&right.source_path)
+                    || right.source_path.starts_with(&left.source_path)
+                    || left.destination_directory.starts_with(&right.source_path)
+                    || right.destination_directory.starts_with(&left.source_path)
+                {
+                    return Err(FileError::BatchMoveInvalid);
+                }
+            }
+        }
+
+        for index in 0..plans.len() {
+            let conflicts_with_planned_target = plans[..index]
+                .iter()
+                .any(|plan| plan.destination_path == plans[index].destination_path);
+            let target_exists =
+                match tokio::fs::symlink_metadata(&plans[index].destination_path).await {
+                    Ok(_) => true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => return Err(FileError::Io(error.to_string())),
+                };
+            if conflicts_with_planned_target || target_exists {
+                if conflict_strategy == BatchMoveConflictStrategy::Fail {
+                    return Err(FileError::AlreadyExists);
+                }
+                plans[index].conflict = true;
+            }
+        }
+
+        let mut rollback = MoveRollback::default();
+        for plan in plans.iter_mut().filter(|plan| !plan.conflict) {
+            validate_resolved_directory(&plan.destination_directory).await?;
+            validate_scoped_source(
+                &plan.source_path,
+                &plan.source_path,
+                plan.source_metadata.is_dir(),
+                plan.source_metadata.len(),
+            )
+            .await?;
+            match tokio::fs::symlink_metadata(&plan.destination_path).await {
+                Ok(_) if conflict_strategy == BatchMoveConflictStrategy::Skip => {
+                    plan.conflict = true;
+                    continue;
+                }
+                Ok(_) => return Err(FileError::AlreadyExists),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(FileError::Io(error.to_string())),
+            }
+            tokio::fs::rename(&plan.source_path, &plan.destination_path)
+                .await
+                .map_err(map_create_error)?;
+            rollback.push(plan.source_path.clone(), plan.destination_path.clone());
+        }
+
+        for plan in plans.iter().filter(|plan| !plan.conflict) {
+            self.invalidate_entry_tree(&plan.source.relative_path);
+        }
+        let mut items = Vec::with_capacity(plans.len());
+        for plan in plans {
+            if plan.conflict {
+                items.push(BatchMoveItemResult {
+                    previous_relative_path: plan.source.relative_path.clone(),
+                    relative_path: display_relative_path(&plan.destination_relative_path),
+                    kind: if plan.source_metadata.is_dir() {
+                        DirectorySearchKind::Directory
+                    } else {
+                        DirectorySearchKind::File
+                    },
+                    status: BatchMoveItemStatus::Skipped,
+                    target_reference_id: None,
+                    error_code: Some(FileError::AlreadyExists.code()),
+                });
+                continue;
+            }
+            let target_reference_id = self.register_entry(
+                plan.destination_path,
+                plan.destination_relative_path.clone(),
+                plan.destination_name,
+            );
+            items.push(BatchMoveItemResult {
+                previous_relative_path: plan.source.relative_path,
+                relative_path: display_relative_path(&plan.destination_relative_path),
+                kind: if plan.source_metadata.is_dir() {
+                    DirectorySearchKind::Directory
+                } else {
+                    DirectorySearchKind::File
+                },
+                status: BatchMoveItemStatus::Moved,
+                target_reference_id: Some(target_reference_id),
+                error_code: None,
+            });
+        }
+        rollback.disarm();
+        let moved = items
+            .iter()
+            .filter(|item| item.status == BatchMoveItemStatus::Moved)
+            .count();
+        Ok(BatchMoveResult {
+            skipped: items.len() - moved,
+            moved,
+            items,
+        })
+    }
+
     pub(crate) async fn trash_entry(
         &self,
         source_reference_id: &str,
@@ -641,6 +801,44 @@ struct CopyPlan {
     entries: Vec<CopyPlanEntry>,
     copied_entries: usize,
     copied_bytes: u64,
+}
+
+struct BatchMovePlan {
+    source: AuthorizedDirectoryEntry,
+    source_path: PathBuf,
+    source_metadata: Metadata,
+    destination_directory: PathBuf,
+    destination_path: PathBuf,
+    destination_relative_path: PathBuf,
+    destination_name: String,
+    conflict: bool,
+}
+
+#[derive(Default)]
+struct MoveRollback {
+    moves: Vec<(PathBuf, PathBuf)>,
+    armed: bool,
+}
+
+impl MoveRollback {
+    fn push(&mut self, source: PathBuf, destination: PathBuf) {
+        self.armed = true;
+        self.moves.push((source, destination));
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for MoveRollback {
+    fn drop(&mut self) {
+        if self.armed {
+            for (source, destination) in self.moves.iter().rev() {
+                let _ = std::fs::rename(destination, source);
+            }
+        }
+    }
 }
 
 async fn build_copy_plan(source: &Path, metadata: &Metadata) -> Result<CopyPlan, FileError> {
@@ -872,6 +1070,51 @@ pub(crate) struct DirectoryCopyResult {
 pub(crate) struct DirectoryMoveResult {
     pub(crate) previous_relative_path: String,
     pub(crate) metadata: DirectoryEntryMetadata,
+}
+
+#[derive(Debug)]
+pub(crate) struct BatchMoveEntryRequest {
+    pub(crate) source_reference_id: String,
+    pub(crate) destination_directory_reference_id: Option<String>,
+    pub(crate) destination_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchMoveConflictStrategy {
+    Fail,
+    Skip,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchMoveItemStatus {
+    Moved,
+    Skipped,
+}
+
+impl BatchMoveItemStatus {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Moved => "moved",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct BatchMoveItemResult {
+    pub(crate) previous_relative_path: String,
+    pub(crate) relative_path: String,
+    pub(crate) kind: DirectorySearchKind,
+    pub(crate) status: BatchMoveItemStatus,
+    pub(crate) target_reference_id: Option<String>,
+    pub(crate) error_code: Option<&'static str>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct BatchMoveResult {
+    pub(crate) items: Vec<BatchMoveItemResult>,
+    pub(crate) moved: usize,
+    pub(crate) skipped: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1217,6 +1460,8 @@ pub enum FileError {
     MoveIntoSource,
     #[error("moving the entry to the system trash failed")]
     Trash,
+    #[error("batch move must contain 1 to 20 independent entries")]
+    BatchMoveInvalid,
     #[error("selected path must be a regular file")]
     NotRegularFile,
     #[error("selected path must be a directory")]
@@ -1261,6 +1506,7 @@ impl FileError {
             Self::MoveDestinationInvalid => "file_move_destination_invalid",
             Self::MoveIntoSource => "file_move_into_source",
             Self::Trash => "file_trash",
+            Self::BatchMoveInvalid => "file_batch_move_invalid",
             Self::NotRegularFile => "file_not_regular",
             Self::NotDirectory => "directory_not_found",
             Self::DirectoryScopeTooBroad => "directory_scope_too_broad",
@@ -1288,7 +1534,8 @@ impl From<std::io::Error> for FileError {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_sensitive_directory_scope, DirectorySearchKind, FileError, SelectedDirectories,
+        is_sensitive_directory_scope, BatchMoveConflictStrategy, BatchMoveEntryRequest,
+        BatchMoveItemStatus, DirectorySearchKind, FileError, MoveRollback, SelectedDirectories,
         SelectedFiles, MAX_COPY_ENTRIES, MAX_CREATED_TEXT_FILE_BYTES, MAX_DIRECTORY_ENTRIES,
         MAX_DIRECTORY_SEARCH_RESULTS, MAX_SELECTED_FILE_BYTES,
     };
@@ -2028,5 +2275,169 @@ mod tests {
         tokio::fs::remove_dir_all(path)
             .await
             .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn batch_moves_independent_entries_and_skips_conflicts() {
+        let path = test_path("batch-move");
+        tokio::fs::create_dir_all(path.join("destination"))
+            .await
+            .expect("create destination");
+        tokio::fs::write(path.join("alpha.txt"), "alpha")
+            .await
+            .expect("write alpha");
+        tokio::fs::write(path.join("beta.txt"), "beta")
+            .await
+            .expect("write beta");
+        tokio::fs::write(path.join("destination/beta.txt"), "existing")
+            .await
+            .expect("write conflict");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+        let listing = directory.list().await.expect("list root");
+        let entry_reference = |name: &str| {
+            listing
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .and_then(|entry| entry.target_reference_id.clone())
+                .expect("entry reference")
+        };
+        let destination_reference = entry_reference("destination");
+        let alpha_reference = entry_reference("alpha.txt");
+        let beta_reference = entry_reference("beta.txt");
+        let requests = [
+            BatchMoveEntryRequest {
+                source_reference_id: alpha_reference.clone(),
+                destination_directory_reference_id: Some(destination_reference.clone()),
+                destination_name: "alpha.txt".into(),
+            },
+            BatchMoveEntryRequest {
+                source_reference_id: beta_reference.clone(),
+                destination_directory_reference_id: Some(destination_reference),
+                destination_name: "beta.txt".into(),
+            },
+        ];
+
+        let result = directory
+            .move_entries(&requests, BatchMoveConflictStrategy::Skip)
+            .await
+            .expect("batch move");
+        assert_eq!(result.moved, 1);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.items[0].status, BatchMoveItemStatus::Moved);
+        assert_eq!(result.items[1].status, BatchMoveItemStatus::Skipped);
+        assert!(!path.join("alpha.txt").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("destination/alpha.txt"))
+                .await
+                .expect("read moved alpha"),
+            "alpha"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("destination/beta.txt"))
+                .await
+                .expect("read existing beta"),
+            "existing"
+        );
+        assert!(path.join("beta.txt").is_file());
+        assert_eq!(
+            directory.entry_metadata(&alpha_reference).await,
+            Err(FileError::EntryReferenceInvalid)
+        );
+        assert!(directory.entry_metadata(&beta_reference).await.is_ok());
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn batch_move_fail_strategy_keeps_all_sources_unchanged() {
+        let path = test_path("batch-move-fail");
+        tokio::fs::create_dir_all(path.join("destination"))
+            .await
+            .expect("create destination");
+        tokio::fs::write(path.join("alpha.txt"), "alpha")
+            .await
+            .expect("write alpha");
+        tokio::fs::write(path.join("beta.txt"), "beta")
+            .await
+            .expect("write beta");
+        tokio::fs::write(path.join("destination/beta.txt"), "existing")
+            .await
+            .expect("write conflict");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+        let listing = directory.list().await.expect("list root");
+        let entry_reference = |name: &str| {
+            listing
+                .entries
+                .iter()
+                .find(|entry| entry.name == name)
+                .and_then(|entry| entry.target_reference_id.clone())
+                .expect("entry reference")
+        };
+        let destination_reference = entry_reference("destination");
+        let requests = [
+            BatchMoveEntryRequest {
+                source_reference_id: entry_reference("alpha.txt"),
+                destination_directory_reference_id: Some(destination_reference.clone()),
+                destination_name: "alpha.txt".into(),
+            },
+            BatchMoveEntryRequest {
+                source_reference_id: entry_reference("beta.txt"),
+                destination_directory_reference_id: Some(destination_reference),
+                destination_name: "beta.txt".into(),
+            },
+        ];
+
+        assert_eq!(
+            directory
+                .move_entries(&requests, BatchMoveConflictStrategy::Fail)
+                .await,
+            Err(FileError::AlreadyExists)
+        );
+        assert!(path.join("alpha.txt").is_file());
+        assert!(path.join("beta.txt").is_file());
+        assert!(!path.join("destination/alpha.txt").exists());
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[test]
+    fn batch_move_rollback_restores_completed_moves_in_reverse_order() {
+        let path = test_path("batch-move-rollback");
+        std::fs::create_dir_all(&path).expect("create directory");
+        let alpha = path.join("alpha.txt");
+        let beta = path.join("beta.txt");
+        let moved_alpha = path.join("moved-alpha.txt");
+        let moved_beta = path.join("moved-beta.txt");
+        std::fs::write(&alpha, "alpha").expect("write alpha");
+        std::fs::write(&beta, "beta").expect("write beta");
+
+        {
+            let mut rollback = MoveRollback::default();
+            std::fs::rename(&alpha, &moved_alpha).expect("move alpha");
+            rollback.push(alpha.clone(), moved_alpha.clone());
+            std::fs::rename(&beta, &moved_beta).expect("move beta");
+            rollback.push(beta.clone(), moved_beta.clone());
+        }
+
+        assert!(alpha.is_file());
+        assert!(beta.is_file());
+        assert!(!moved_alpha.exists());
+        assert!(!moved_beta.exists());
+        std::fs::remove_dir_all(path).expect("remove directory");
     }
 }

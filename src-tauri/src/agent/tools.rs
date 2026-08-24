@@ -11,7 +11,8 @@ use tokio::io::AsyncWriteExt;
 
 use crate::files::{
     validate_copy_destination_name, validate_created_directory, validate_created_text_file,
-    validate_move_destination_name, AuthorizedDirectory, AuthorizedFile, DirectorySearchKind,
+    validate_move_destination_name, AuthorizedDirectory, AuthorizedFile, BatchMoveConflictStrategy,
+    BatchMoveEntryRequest, DirectorySearchKind, MAX_BATCH_MOVE_ENTRIES,
 };
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
@@ -279,6 +280,46 @@ impl ToolRegistry {
                 input_schema: directory_entry_input_schema(),
             },
             ToolDefinition {
+                name: "batch_move_directory_entries".into(),
+                description: "Move or rename up to 20 independent, previously listed or searched entries within the same authorized directory. Each source and destination directory is bound to its opaque reference and relative path. Conflicts either fail the whole batch before changes or are skipped with per-item results. This always requires user approval.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the selected directory."
+                        },
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": MAX_BATCH_MOVE_ENTRIES,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "sourceTargetReferenceId": { "type": "string" },
+                                    "sourceRelativePath": { "type": "string" },
+                                    "destinationDirectoryTargetReferenceId": { "type": "string" },
+                                    "destinationDirectoryRelativePath": { "type": "string" },
+                                    "destinationName": {
+                                        "type": "string",
+                                        "description": "A plain destination name without path separators."
+                                    }
+                                },
+                                "required": ["sourceTargetReferenceId", "sourceRelativePath", "destinationName"],
+                                "additionalProperties": false
+                            }
+                        },
+                        "conflictStrategy": {
+                            "type": "string",
+                            "enum": ["fail", "skip"],
+                            "description": "Fail the whole batch before changes when a target exists, or skip conflicting items. Defaults to fail."
+                        }
+                    },
+                    "required": ["referenceId", "items"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
                 name: "get_directory_entry_metadata".into(),
                 description: "Get size, modification time, entry type, and file extension for an entry returned by list_selected_directory or search_selected_directory.".into(),
                 input_schema: directory_entry_input_schema(),
@@ -358,6 +399,7 @@ impl ToolRegistry {
             "copy_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "move_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "trash_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
+            "batch_move_directory_entries" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "open_directory_entry" | "reveal_directory_entry" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
@@ -399,6 +441,7 @@ impl ToolRegistry {
             "copy_directory_entry" => self.copy_directory_entry(arguments).await,
             "move_directory_entry" => self.move_directory_entry(arguments).await,
             "trash_directory_entry" => self.trash_directory_entry(arguments).await,
+            "batch_move_directory_entries" => self.batch_move_directory_entries(arguments).await,
             "open_directory_entry" => self.directory_entry_action(name, arguments, false).await,
             "reveal_directory_entry" => self.directory_entry_action(name, arguments, true).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
@@ -549,6 +592,38 @@ impl ToolRegistry {
                     }
                     _ => Err(crate::files::FileError::EntryReferenceInvalid.into()),
                 }
+            }
+            "batch_move_directory_entries" => {
+                let arguments = parse_batch_move_arguments(name, arguments)?;
+                if arguments.items.is_empty() || arguments.items.len() > MAX_BATCH_MOVE_ENTRIES {
+                    return Err(crate::files::FileError::BatchMoveInvalid.into());
+                }
+                let directory = self
+                    .authorized_directories
+                    .get(&arguments.reference_id)
+                    .ok_or(crate::files::FileError::ReferenceInvalid)?;
+                for item in &arguments.items {
+                    validate_move_destination_name(&item.destination_name)?;
+                    if !directory.validates_entry_reference(
+                        &item.source_target_reference_id,
+                        &item.source_relative_path,
+                    ) {
+                        return Err(crate::files::FileError::EntryReferenceInvalid.into());
+                    }
+                    match (
+                        &item.destination_directory_target_reference_id,
+                        &item.destination_directory_relative_path,
+                    ) {
+                        (None, None) => {}
+                        (Some(reference_id), Some(relative_path))
+                            if directory.validates_entry_reference(reference_id, relative_path) => {
+                        }
+                        _ => {
+                            return Err(crate::files::FileError::EntryReferenceInvalid.into());
+                        }
+                    }
+                }
+                Ok(())
             }
             _ => Err(RuntimeError::ToolNotFound(name.into())),
         }
@@ -782,6 +857,42 @@ impl ToolRegistry {
         }))
     }
 
+    async fn batch_move_directory_entries(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments = parse_batch_move_arguments("batch_move_directory_entries", arguments)?;
+        let directory = self
+            .authorized_directories
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let requests = arguments
+            .items
+            .iter()
+            .map(|item| BatchMoveEntryRequest {
+                source_reference_id: item.source_target_reference_id.clone(),
+                destination_directory_reference_id: item
+                    .destination_directory_target_reference_id
+                    .clone(),
+                destination_name: item.destination_name.clone(),
+            })
+            .collect::<Vec<_>>();
+        let result = directory
+            .move_entries(&requests, arguments.conflict_strategy.into())
+            .await?;
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "items": result.items.into_iter().map(|item| json!({
+                "previousRelativePath": item.previous_relative_path,
+                "relativePath": item.relative_path,
+                "kind": item.kind.as_str(),
+                "status": item.status.as_str(),
+                "targetReferenceId": item.target_reference_id,
+                "errorCode": item.error_code
+            })).collect::<Vec<_>>(),
+            "moved": result.moved,
+            "skipped": result.skipped,
+            "completed": true
+        }))
+    }
+
     async fn directory_entry_action(
         &self,
         name: &str,
@@ -913,6 +1024,52 @@ struct MoveDirectoryEntryArguments {
     destination_directory_target_reference_id: Option<String>,
     destination_directory_relative_path: Option<String>,
     destination_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchMoveArguments {
+    reference_id: String,
+    items: Vec<BatchMoveItemArguments>,
+    #[serde(default)]
+    conflict_strategy: BatchMoveConflictStrategyArgument,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchMoveItemArguments {
+    source_target_reference_id: String,
+    source_relative_path: String,
+    destination_directory_target_reference_id: Option<String>,
+    destination_directory_relative_path: Option<String>,
+    destination_name: String,
+}
+
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BatchMoveConflictStrategyArgument {
+    #[default]
+    Fail,
+    Skip,
+}
+
+impl From<BatchMoveConflictStrategyArgument> for BatchMoveConflictStrategy {
+    fn from(value: BatchMoveConflictStrategyArgument) -> Self {
+        match value {
+            BatchMoveConflictStrategyArgument::Fail => Self::Fail,
+            BatchMoveConflictStrategyArgument::Skip => Self::Skip,
+        }
+    }
+}
+
+fn parse_batch_move_arguments(
+    name: &str,
+    arguments: &Value,
+) -> Result<BatchMoveArguments, RuntimeError> {
+    serde_json::from_value(arguments.clone()).map_err(|error| RuntimeError::InvalidToolArguments {
+        name: name.into(),
+        message: error.to_string(),
+    })
 }
 
 fn parse_move_directory_entry_arguments(

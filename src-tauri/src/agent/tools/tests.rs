@@ -591,6 +591,99 @@ async fn moves_a_referenced_entry_only_after_approval() {
 }
 
 #[tokio::test]
+async fn batch_moves_referenced_entries_with_per_item_results() {
+    let path = std::env::temp_dir().join(format!(
+        "yukin-batch-move-tool-test-{}",
+        uuid::Uuid::now_v7()
+    ));
+    tokio::fs::create_dir_all(path.join("destination"))
+        .await
+        .expect("create selected directory");
+    tokio::fs::write(path.join("alpha.txt"), "alpha")
+        .await
+        .expect("write alpha");
+    tokio::fs::write(path.join("beta.txt"), "beta")
+        .await
+        .expect("write beta");
+    tokio::fs::write(path.join("destination/beta.txt"), "existing")
+        .await
+        .expect("write conflict");
+    let directories = SelectedDirectories::default();
+    let reference = directories
+        .register(path.clone())
+        .await
+        .expect("register directory");
+    let directory = directories.take(&reference).expect("take reference");
+    let listing = directory.list().await.expect("list directory");
+    let entry = |name: &str| {
+        listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == name)
+            .expect("listed entry")
+    };
+    let destination = entry("destination");
+    let alpha = entry("alpha.txt");
+    let beta = entry("beta.txt");
+    let arguments = json!({
+        "referenceId": reference.reference_id,
+        "items": [
+            {
+                "sourceTargetReferenceId": alpha.target_reference_id,
+                "sourceRelativePath": "alpha.txt",
+                "destinationDirectoryTargetReferenceId": destination.target_reference_id,
+                "destinationDirectoryRelativePath": "destination",
+                "destinationName": "alpha.txt"
+            },
+            {
+                "sourceTargetReferenceId": beta.target_reference_id,
+                "sourceRelativePath": "beta.txt",
+                "destinationDirectoryTargetReferenceId": destination.target_reference_id,
+                "destinationDirectoryRelativePath": "destination",
+                "destinationName": "beta.txt"
+            }
+        ],
+        "conflictStrategy": "skip"
+    });
+    let registry = ToolRegistry::with_authorizations(PathBuf::new(), Vec::new(), vec![directory]);
+
+    assert!(matches!(
+        registry
+            .execute(
+                "batch_move_directory_entries",
+                &arguments,
+                ExecutionAuthorization::NotRequired,
+            )
+            .await,
+        Err(RuntimeError::InvalidToolApproval(_))
+    ));
+    assert!(path.join("alpha.txt").is_file());
+
+    let result = registry
+        .execute(
+            "batch_move_directory_entries",
+            &arguments,
+            ExecutionAuthorization::Approved {
+                arguments_digest: arguments_digest(&arguments).expect("arguments digest").1,
+            },
+        )
+        .await
+        .expect("batch move approved entries");
+    assert_eq!(result["moved"], 1);
+    assert_eq!(result["skipped"], 1);
+    assert_eq!(result["items"][0]["status"], "moved");
+    assert_eq!(result["items"][1]["status"], "skipped");
+    assert_eq!(result["items"][1]["errorCode"], "file_already_exists");
+    assert!(!result.to_string().contains(path.to_string_lossy().as_ref()));
+    assert!(path.join("destination/alpha.txt").is_file());
+    assert!(path.join("beta.txt").is_file());
+
+    tokio::fs::remove_dir_all(path)
+        .await
+        .expect("remove selected directory");
+}
+
+#[tokio::test]
 async fn refuses_to_trash_a_referenced_entry_without_approval() {
     let path = std::env::temp_dir().join(format!(
         "yukin-trash-entry-tool-test-{}",

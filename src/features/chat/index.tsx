@@ -198,6 +198,7 @@ function ToolCallCard({
             copy_directory_entry: "复制文件或目录",
             move_directory_entry: "移动或重命名",
             trash_directory_entry: "移入系统回收站",
+            batch_move_directory_entries: "批量移动或重命名",
           }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
@@ -228,6 +229,11 @@ function ToolCallCard({
           <MoveDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : toolCall.name === "trash_directory_entry" ? (
           <TrashDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
+        ) : toolCall.name === "batch_move_directory_entries" ? (
+          <BatchMoveDirectoryEntriesResult
+            argumentsValue={toolCall.arguments}
+            value={toolCall.result}
+          />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -261,7 +267,9 @@ function ToolCallCard({
                             ? "允许移动"
                             : toolCall.name === "trash_directory_entry"
                               ? "允许移入回收站"
-                              : "允许"}
+                              : toolCall.name === "batch_move_directory_entries"
+                                ? "允许批量移动"
+                                : "允许"}
             </Button>
           </div>
         )}
@@ -734,6 +742,102 @@ function TrashDirectoryEntryResult({
   );
 }
 
+function BatchMoveDirectoryEntriesResult({
+  argumentsValue,
+  value,
+}: {
+  argumentsValue: unknown;
+  value: unknown;
+}) {
+  const argumentsObject =
+    argumentsValue && typeof argumentsValue === "object"
+      ? (argumentsValue as {
+          items?: unknown;
+          conflictStrategy?: unknown;
+        })
+      : {};
+  const argumentItems = Array.isArray(argumentsObject.items)
+    ? (argumentsObject.items as Array<{
+        sourceRelativePath?: unknown;
+        destinationDirectoryRelativePath?: unknown;
+        destinationName?: unknown;
+      }>)
+    : [];
+  const result =
+    value && typeof value === "object"
+      ? (value as {
+          directoryName?: unknown;
+          moved?: unknown;
+          skipped?: unknown;
+          items?: unknown;
+        })
+      : null;
+
+  if (!result) {
+    return (
+      <div className="space-y-2">
+        <p>
+          将批量处理 {argumentItems.length} 个条目 · 冲突时
+          {argumentsObject.conflictStrategy === "skip" ? "跳过" : "整批停止"}
+        </p>
+        <div className="space-y-1">
+          {argumentItems.map((item, index) => (
+            <p key={index}>
+              {String(item.sourceRelativePath ?? "已授权条目")} →{" "}
+              {typeof item.destinationDirectoryRelativePath === "string"
+                ? item.destinationDirectoryRelativePath + " / "
+                : "已授权目录根部 / "}
+              {String(item.destinationName ?? "新名称")}
+            </p>
+          ))}
+        </div>
+        <p className="text-muted-foreground">异常或取消时会回滚本批已经完成的移动。</p>
+      </div>
+    );
+  }
+
+  const resultItems = Array.isArray(result.items)
+    ? (result.items as Array<{
+        previousRelativePath?: unknown;
+        relativePath?: unknown;
+        kind?: unknown;
+        status?: unknown;
+        targetReferenceId?: unknown;
+      }>)
+    : [];
+  return (
+    <div className="space-y-2">
+      <p>
+        {typeof result.directoryName === "string" ? result.directoryName + " · " : ""}
+        已移动 {Number(result.moved ?? 0)} 项 · 跳过 {Number(result.skipped ?? 0)} 项
+      </p>
+      <div className="space-y-2">
+        {resultItems.map((item, index) =>
+          item.status === "moved" ? (
+            <DirectoryEntryRow
+              key={index}
+              kind={item.kind === "directory" ? "directory" : "file"}
+              label={
+                String(item.previousRelativePath ?? "原位置") +
+                " → " +
+                String(item.relativePath ?? "新位置")
+              }
+              targetReferenceId={
+                typeof item.targetReferenceId === "string" ? item.targetReferenceId : null
+              }
+            />
+          ) : (
+            <p key={index} className="text-muted-foreground">
+              已跳过 {String(item.previousRelativePath ?? "冲突条目")} →{" "}
+              {String(item.relativePath ?? "冲突目标")}
+            </p>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FileReadResult({ value }: { value: unknown }) {
   if (!value || typeof value !== "object") {
     return <p className="text-muted-foreground">正在读取已授权附件…</p>;
@@ -776,6 +880,7 @@ function formatToolError(code: string | null, fallback: string) {
       file_move_destination_invalid: "新名称无效；请输入不含路径分隔符的普通名称。",
       file_move_into_source: "不能把目录移动到自身或其子目录中。",
       file_trash: "无法将该条目移入系统回收站；请检查系统权限或稍后重试。",
+      file_batch_move_invalid: "批量移动必须包含 1 至 20 个互不重叠的条目。",
     }[code ?? ""] ?? fallback
   );
 }
