@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as InitializeRouteImport } from './routes/initialize'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SettingsMcpServersRouteImport } from './routes/settings.mcp-servers'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
+import { Route as SettingsSkillsRouteImport } from './routes/settings.skills'
 
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
@@ -29,9 +31,19 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsMcpServersRoute = SettingsMcpServersRouteImport.update({
+  id: '/mcp-servers',
+  path: '/mcp-servers',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSkillsRoute = SettingsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => SettingsRoute,
 } as any)
 
@@ -39,27 +51,52 @@ export interface FileRoutesByFullPath {
   '/chat': typeof ChatRoute
   '/initialize': typeof InitializeRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/settings/mcp-servers': typeof SettingsMcpServersRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/skills': typeof SettingsSkillsRoute
 }
 export interface FileRoutesByTo {
   '/chat': typeof ChatRoute
   '/initialize': typeof InitializeRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/settings/mcp-servers': typeof SettingsMcpServersRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/skills': typeof SettingsSkillsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/chat': typeof ChatRoute
   '/initialize': typeof InitializeRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/settings/mcp-servers': typeof SettingsMcpServersRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/skills': typeof SettingsSkillsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/chat' | '/initialize' | '/settings' | '/settings/providers'
+  fullPaths:
+    | '/chat'
+    | '/initialize'
+    | '/settings'
+    | '/settings/mcp-servers'
+    | '/settings/providers'
+    | '/settings/skills'
   fileRoutesByTo: FileRoutesByTo
-  to: '/chat' | '/initialize' | '/settings' | '/settings/providers'
-  id: '__root__' | '/chat' | '/initialize' | '/settings' | '/settings/providers'
+  to:
+    | '/chat'
+    | '/initialize'
+    | '/settings'
+    | '/settings/mcp-servers'
+    | '/settings/providers'
+    | '/settings/skills'
+  id:
+    | '__root__'
+    | '/chat'
+    | '/initialize'
+    | '/settings'
+    | '/settings/mcp-servers'
+    | '/settings/providers'
+    | '/settings/skills'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -91,6 +128,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/mcp-servers': {
+      id: '/settings/mcp-servers'
+      path: '/mcp-servers'
+      fullPath: '/settings/mcp-servers'
+      preLoaderRoute: typeof SettingsMcpServersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/providers': {
       id: '/settings/providers'
       path: '/providers'
@@ -98,15 +142,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsProvidersRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/skills': {
+      id: '/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof SettingsSkillsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
   }
 }
 
 interface SettingsRouteChildren {
+  SettingsMcpServersRoute: typeof SettingsMcpServersRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
+  SettingsSkillsRoute: typeof SettingsSkillsRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsMcpServersRoute: SettingsMcpServersRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
+  SettingsSkillsRoute: SettingsSkillsRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
