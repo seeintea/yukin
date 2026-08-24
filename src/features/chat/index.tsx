@@ -196,6 +196,7 @@ function ToolCallCard({
             create_text_file_in_selected_directory: "创建文本文件",
             create_directory_in_selected_directory: "创建目录",
             copy_directory_entry: "复制文件或目录",
+            move_directory_entry: "移动或重命名",
           }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
@@ -222,6 +223,8 @@ function ToolCallCard({
           <CreateDirectoryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : toolCall.name === "copy_directory_entry" ? (
           <CopyDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
+        ) : toolCall.name === "move_directory_entry" ? (
+          <MoveDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -251,7 +254,9 @@ function ToolCallCard({
                         ? "允许创建"
                         : toolCall.name === "copy_directory_entry"
                           ? "允许复制"
-                          : "允许"}
+                          : toolCall.name === "move_directory_entry"
+                            ? "允许移动"
+                            : "允许"}
             </Button>
           </div>
         )}
@@ -622,6 +627,70 @@ function CopyDirectoryEntryResult({
   );
 }
 
+function MoveDirectoryEntryResult({
+  argumentsValue,
+  value,
+}: {
+  argumentsValue: unknown;
+  value: unknown;
+}) {
+  const argumentsObject =
+    argumentsValue && typeof argumentsValue === "object"
+      ? (argumentsValue as {
+          sourceRelativePath?: unknown;
+          destinationDirectoryRelativePath?: unknown;
+          destinationName?: unknown;
+        })
+      : {};
+  const result =
+    value && typeof value === "object"
+      ? (value as {
+          directoryName?: unknown;
+          previousRelativePath?: unknown;
+          relativePath?: unknown;
+          targetReferenceId?: unknown;
+          kind?: unknown;
+        })
+      : null;
+
+  if (!result) {
+    const destination =
+      typeof argumentsObject.destinationDirectoryRelativePath === "string"
+        ? argumentsObject.destinationDirectoryRelativePath
+        : "已授权目录根部";
+    return (
+      <div className="space-y-1">
+        <p>原位置：{String(argumentsObject.sourceRelativePath ?? "已授权条目")}</p>
+        <p>
+          新位置：{destination} / {String(argumentsObject.destinationName ?? "新名称")}
+        </p>
+        <p className="text-muted-foreground">不会覆盖同名条目；移动后原条目引用将失效。</p>
+      </div>
+    );
+  }
+
+  const relativePath = String(result.relativePath ?? argumentsObject.destinationName ?? "新位置");
+  const kind = result.kind === "directory" ? "directory" : "file";
+  return (
+    <div className="space-y-2">
+      <p>
+        {typeof result.directoryName === "string" ? result.directoryName + " · " : ""}
+        已从 {String(
+          result.previousRelativePath ?? argumentsObject.sourceRelativePath ?? "原位置",
+        )}{" "}
+        移动到 {relativePath}
+      </p>
+      <DirectoryEntryRow
+        kind={kind}
+        label={relativePath}
+        targetReferenceId={
+          typeof result.targetReferenceId === "string" ? result.targetReferenceId : null
+        }
+      />
+    </div>
+  );
+}
+
 function FileReadResult({ value }: { value: unknown }) {
   if (!value || typeof value !== "object") {
     return <p className="text-muted-foreground">正在读取已授权附件…</p>;
@@ -661,6 +730,8 @@ function formatToolError(code: string | null, fallback: string) {
       file_copy_destination_invalid: "副本名称无效；请输入不含路径分隔符的普通名称。",
       file_copy_limit_exceeded: "复制范围超过 100 个条目、8 层目录或 16 MiB 限制。",
       file_copy_into_source: "不能把目录复制到自身或其子目录中。",
+      file_move_destination_invalid: "新名称无效；请输入不含路径分隔符的普通名称。",
+      file_move_into_source: "不能把目录移动到自身或其子目录中。",
     }[code ?? ""] ?? fallback
   );
 }

@@ -341,7 +341,7 @@ impl AuthorizedDirectory {
         let destination_relative_path = destination_relative_directory.join(destination_name);
         let plan = build_copy_plan(&source_path, &source_metadata).await?;
         validate_resolved_directory(&destination_directory).await?;
-        validate_copy_source(
+        validate_scoped_source(
             &source_path,
             &source_path,
             source_metadata.is_dir(),
@@ -379,7 +379,7 @@ impl AuthorizedDirectory {
                 let destination_child = destination_path.join(&entry.relative_path);
                 match entry.kind {
                     CopyPlanKind::Directory => {
-                        validate_copy_source(&source_child, &source_path, true, 0).await?;
+                        validate_scoped_source(&source_child, &source_path, true, 0).await?;
                         tokio::fs::create_dir(&destination_child)
                             .await
                             .map_err(map_create_error)?;
@@ -436,6 +436,102 @@ impl AuthorizedDirectory {
             copied_entries: plan.copied_entries,
             copied_bytes: plan.copied_bytes,
         })
+    }
+
+    pub(crate) async fn move_entry(
+        &self,
+        source_reference_id: &str,
+        destination_directory_reference_id: Option<&str>,
+        destination_name: &str,
+    ) -> Result<DirectoryMoveResult, FileError> {
+        validate_move_destination_name(destination_name)?;
+        let canonical_root = self.validate_root().await?;
+        let source = self.entry(source_reference_id)?;
+        let (source_path, source_metadata) = source.resolve().await?;
+        let (destination_directory, destination_relative_directory) =
+            if let Some(reference_id) = destination_directory_reference_id {
+                let destination = self.entry(reference_id)?;
+                let (path, metadata) = destination.resolve().await?;
+                if !metadata.is_dir() {
+                    return Err(FileError::NotDirectory);
+                }
+                (path, PathBuf::from(destination.relative_path))
+            } else {
+                (canonical_root, PathBuf::new())
+            };
+
+        if source_metadata.is_dir() && destination_directory.starts_with(&source_path) {
+            return Err(FileError::MoveIntoSource);
+        }
+        let destination_path = destination_directory.join(destination_name);
+        if destination_path == source_path {
+            return Err(FileError::AlreadyExists);
+        }
+        match tokio::fs::symlink_metadata(&destination_path).await {
+            Ok(_) => return Err(FileError::AlreadyExists),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(FileError::Io(error.to_string())),
+        }
+
+        validate_resolved_directory(&destination_directory).await?;
+        validate_scoped_source(
+            &source_path,
+            &source_path,
+            source_metadata.is_dir(),
+            source_metadata.len(),
+        )
+        .await?;
+        tokio::fs::rename(&source_path, &destination_path)
+            .await
+            .map_err(map_create_error)?;
+
+        let destination_relative_path = destination_relative_directory.join(destination_name);
+        self.invalidate_entry_tree(&source.relative_path);
+        let target_reference_id = self.register_entry(
+            destination_path,
+            destination_relative_path.clone(),
+            destination_name.to_owned(),
+        );
+        let kind = if source_metadata.is_dir() {
+            DirectorySearchKind::Directory
+        } else {
+            DirectorySearchKind::File
+        };
+        let modified_at = source_metadata.modified().ok().map(|modified| {
+            chrono::DateTime::<chrono::Utc>::from(modified)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        });
+        let extension = (kind == DirectorySearchKind::File)
+            .then(|| {
+                Path::new(destination_name)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_lowercase)
+            })
+            .flatten();
+        Ok(DirectoryMoveResult {
+            previous_relative_path: source.relative_path,
+            metadata: DirectoryEntryMetadata {
+                target_reference_id,
+                name: destination_name.to_owned(),
+                relative_path: display_relative_path(&destination_relative_path),
+                kind,
+                size: (kind == DirectorySearchKind::File).then_some(source_metadata.len()),
+                modified_at,
+                extension,
+            },
+        })
+    }
+
+    fn invalidate_entry_tree(&self, relative_path: &str) {
+        let relative_path = Path::new(relative_path);
+        self.entries
+            .lock()
+            .expect("directory entry registry lock")
+            .retain(|_, entry| {
+                entry.directory_reference_id != self.reference.reference_id
+                    || !Path::new(&entry.relative_path).starts_with(relative_path)
+            });
     }
 
     fn entry(&self, reference_id: &str) -> Result<AuthorizedDirectoryEntry, FileError> {
@@ -579,7 +675,7 @@ async fn copy_file_checked(
     create_destination: bool,
     source_scope: &Path,
 ) -> Result<(), FileError> {
-    validate_copy_source(source, source_scope, false, expected_size).await?;
+    validate_scoped_source(source, source_scope, false, expected_size).await?;
     let mut source_file = tokio::fs::File::open(source).await?;
     let mut options = tokio::fs::OpenOptions::new();
     options.write(true);
@@ -597,7 +693,7 @@ async fn copy_file_checked(
     Ok(())
 }
 
-async fn validate_copy_source(
+async fn validate_scoped_source(
     path: &Path,
     source_scope: &Path,
     expected_directory: bool,
@@ -733,6 +829,12 @@ pub(crate) struct DirectoryCopyResult {
     pub(crate) metadata: DirectoryEntryMetadata,
     pub(crate) copied_entries: usize,
     pub(crate) copied_bytes: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct DirectoryMoveResult {
+    pub(crate) previous_relative_path: String,
+    pub(crate) metadata: DirectoryEntryMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -969,6 +1071,14 @@ pub(crate) fn validate_copy_destination_name(name: &str) -> Result<(), FileError
     }
 }
 
+pub(crate) fn validate_move_destination_name(name: &str) -> Result<(), FileError> {
+    if validate_created_entry_name(name) {
+        Ok(())
+    } else {
+        Err(FileError::MoveDestinationInvalid)
+    }
+}
+
 fn validate_created_entry_name(name: &str) -> bool {
     let path = Path::new(name);
     !name.is_empty()
@@ -1057,6 +1167,10 @@ pub enum FileError {
     CopyLimitExceeded,
     #[error("a directory cannot be copied into itself or one of its descendants")]
     CopyIntoSource,
+    #[error("move destination name is invalid")]
+    MoveDestinationInvalid,
+    #[error("a directory cannot be moved into itself or one of its descendants")]
+    MoveIntoSource,
     #[error("selected path must be a regular file")]
     NotRegularFile,
     #[error("selected path must be a directory")]
@@ -1098,6 +1212,8 @@ impl FileError {
             Self::CopyDestinationInvalid => "file_copy_destination_invalid",
             Self::CopyLimitExceeded => "file_copy_limit_exceeded",
             Self::CopyIntoSource => "file_copy_into_source",
+            Self::MoveDestinationInvalid => "file_move_destination_invalid",
+            Self::MoveIntoSource => "file_move_into_source",
             Self::NotRegularFile => "file_not_regular",
             Self::NotDirectory => "directory_not_found",
             Self::DirectoryScopeTooBroad => "directory_scope_too_broad",
@@ -1597,6 +1713,13 @@ mod tests {
             Err(FileError::CopyIntoSource)
         );
         assert!(!path.join("source/nested/copy").exists());
+        assert_eq!(
+            directory
+                .move_entry(source_reference, Some(nested_reference), "moved")
+                .await,
+            Err(FileError::MoveIntoSource)
+        );
+        assert!(!path.join("source/nested/moved").exists());
 
         tokio::fs::remove_dir_all(path)
             .await
@@ -1633,6 +1756,135 @@ mod tests {
             Err(FileError::CopyLimitExceeded)
         );
         assert!(!path.join("source-copy").exists());
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn moves_and_renames_entries_while_invalidating_old_references() {
+        let path = test_path("move-entry");
+        tokio::fs::create_dir_all(path.join("source/nested"))
+            .await
+            .expect("create source tree");
+        tokio::fs::create_dir(path.join("destination"))
+            .await
+            .expect("create destination");
+        tokio::fs::write(path.join("source/nested/report.txt"), "report")
+            .await
+            .expect("write nested file");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+        let listing = directory.list().await.expect("list root");
+        let source_reference = listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == "source")
+            .and_then(|entry| entry.target_reference_id.as_deref())
+            .expect("source reference");
+        let destination_reference = listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == "destination")
+            .and_then(|entry| entry.target_reference_id.as_deref())
+            .expect("destination reference");
+        let search = directory
+            .search("report", DirectorySearchKind::File)
+            .await
+            .expect("search nested file");
+        let nested_file_reference = &search.entries[0].target_reference_id;
+
+        let result = directory
+            .move_entry(
+                source_reference,
+                Some(destination_reference),
+                "renamed-source",
+            )
+            .await
+            .expect("move directory");
+        assert_eq!(result.previous_relative_path, "source");
+        assert_eq!(result.metadata.relative_path, "destination/renamed-source");
+        assert_eq!(result.metadata.kind, DirectorySearchKind::Directory);
+        assert!(!path.join("source").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("destination/renamed-source/nested/report.txt"))
+                .await
+                .expect("read moved file"),
+            "report"
+        );
+        assert_eq!(
+            directory.entry_metadata(source_reference).await,
+            Err(FileError::EntryReferenceInvalid)
+        );
+        assert_eq!(
+            directory.entry_metadata(nested_file_reference).await,
+            Err(FileError::EntryReferenceInvalid)
+        );
+        assert!(directory
+            .entry_metadata(&result.metadata.target_reference_id)
+            .await
+            .is_ok());
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn refuses_to_overwrite_when_moving_or_renaming() {
+        let path = test_path("move-conflict");
+        tokio::fs::create_dir_all(&path)
+            .await
+            .expect("create directory");
+        tokio::fs::write(path.join("source.txt"), "source")
+            .await
+            .expect("write source");
+        tokio::fs::write(path.join("existing.txt"), "existing")
+            .await
+            .expect("write existing");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+        let listing = directory.list().await.expect("list root");
+        let source_reference = listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == "source.txt")
+            .and_then(|entry| entry.target_reference_id.as_deref())
+            .expect("source reference");
+
+        assert_eq!(
+            directory
+                .move_entry(source_reference, None, "existing.txt")
+                .await,
+            Err(FileError::AlreadyExists)
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("source.txt"))
+                .await
+                .expect("read source"),
+            "source"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(path.join("existing.txt"))
+                .await
+                .expect("read existing"),
+            "existing"
+        );
+        assert_eq!(
+            directory
+                .move_entry(source_reference, None, "../escape.txt")
+                .await,
+            Err(FileError::MoveDestinationInvalid)
+        );
 
         tokio::fs::remove_dir_all(path)
             .await
