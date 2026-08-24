@@ -276,6 +276,38 @@ impl AuthorizedDirectory {
         })
     }
 
+    pub(crate) async fn create_directory(
+        &self,
+        directory_name: &str,
+    ) -> Result<DirectoryEntryMetadata, FileError> {
+        validate_created_directory(directory_name)?;
+        let canonical_root = self.validate_root().await?;
+        let path = canonical_root.join(directory_name);
+        tokio::fs::create_dir(&path)
+            .await
+            .map_err(map_create_error)?;
+        let modified_at = tokio::fs::metadata(&path).await.ok().and_then(|metadata| {
+            metadata.modified().ok().map(|modified| {
+                chrono::DateTime::<chrono::Utc>::from(modified)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            })
+        });
+        let target_reference_id = self.register_entry(
+            path,
+            PathBuf::from(directory_name),
+            directory_name.to_owned(),
+        );
+        Ok(DirectoryEntryMetadata {
+            target_reference_id,
+            name: directory_name.to_owned(),
+            relative_path: directory_name.to_owned(),
+            kind: DirectorySearchKind::Directory,
+            size: None,
+            modified_at,
+            extension: None,
+        })
+    }
+
     fn entry(&self, reference_id: &str) -> Result<AuthorizedDirectoryEntry, FileError> {
         self.entries
             .lock()
@@ -591,18 +623,9 @@ async fn validate_directory_path(path: &Path) -> Result<(), FileError> {
 
 pub(crate) fn validate_created_text_file(file_name: &str, content: &str) -> Result<(), FileError> {
     let path = Path::new(file_name);
-    let valid_name = !file_name.is_empty()
-        && file_name.len() <= 128
-        && file_name.trim() == file_name
-        && !file_name.starts_with('.')
-        && !file_name
-            .chars()
-            .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+    let valid_name = validate_created_entry_name(file_name)
         && path.extension().and_then(|value| value.to_str()) == Some("txt")
-        && matches!(
-            path.components().collect::<Vec<_>>().as_slice(),
-            [std::path::Component::Normal(_)]
-        );
+        && path.file_stem().is_some_and(|value| !value.is_empty());
     if !valid_name {
         return Err(FileError::InvalidName);
     }
@@ -610,6 +633,29 @@ pub(crate) fn validate_created_text_file(file_name: &str, content: &str) -> Resu
         return Err(FileError::CreatedTextTooLarge);
     }
     Ok(())
+}
+
+pub(crate) fn validate_created_directory(directory_name: &str) -> Result<(), FileError> {
+    if validate_created_entry_name(directory_name) {
+        Ok(())
+    } else {
+        Err(FileError::DirectoryNameInvalid)
+    }
+}
+
+fn validate_created_entry_name(name: &str) -> bool {
+    let path = Path::new(name);
+    !name.is_empty()
+        && name.len() <= 128
+        && name.trim() == name
+        && !name.starts_with('.')
+        && !name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+        && matches!(
+            path.components().collect::<Vec<_>>().as_slice(),
+            [std::path::Component::Normal(_)]
+        )
 }
 
 fn map_create_error(error: std::io::Error) -> FileError {
@@ -675,7 +721,9 @@ pub enum FileError {
     EntryReferenceInvalid,
     #[error("selected file name is invalid")]
     InvalidName,
-    #[error("a file with the requested name already exists")]
+    #[error("directory name is invalid")]
+    DirectoryNameInvalid,
+    #[error("a file or directory with the requested name already exists")]
     AlreadyExists,
     #[error("selected path must be a regular file")]
     NotRegularFile,
@@ -713,6 +761,7 @@ impl FileError {
             Self::ReferenceInvalid => "file_reference_invalid",
             Self::EntryReferenceInvalid => "directory_entry_reference_invalid",
             Self::InvalidName => "file_name_invalid",
+            Self::DirectoryNameInvalid => "directory_name_invalid",
             Self::AlreadyExists => "file_already_exists",
             Self::NotRegularFile => "file_not_regular",
             Self::NotDirectory => "directory_not_found",
@@ -1055,6 +1104,45 @@ mod tests {
                 .await,
             Err(FileError::CreatedTextTooLarge)
         );
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn creates_a_new_directory_without_reusing_or_escaping_scope() {
+        let path = test_path("create-directory");
+        tokio::fs::create_dir(&path)
+            .await
+            .expect("create authorized directory");
+        let directories = SelectedDirectories::default();
+        let directory_reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories
+            .take(&directory_reference)
+            .expect("take directory");
+
+        let metadata = directory
+            .create_directory("项目资料")
+            .await
+            .expect("create child directory");
+        assert_eq!(metadata.relative_path, "项目资料");
+        assert_eq!(metadata.kind, DirectorySearchKind::Directory);
+        assert!(path.join("项目资料").is_dir());
+        assert_eq!(
+            directory.create_directory("项目资料").await,
+            Err(FileError::AlreadyExists)
+        );
+
+        for invalid_name in ["../escape", "nested/child", "nested\\child", ".hidden", " "] {
+            assert_eq!(
+                directory.create_directory(invalid_name).await,
+                Err(FileError::DirectoryNameInvalid)
+            );
+        }
+
         tokio::fs::remove_dir_all(path)
             .await
             .expect("remove directory");

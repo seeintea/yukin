@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use crate::files::{
-    validate_created_text_file, AuthorizedDirectory, AuthorizedFile, DirectorySearchKind,
+    validate_created_directory, validate_created_text_file, AuthorizedDirectory, AuthorizedFile,
+    DirectorySearchKind,
 };
 use crate::protocol::agent_run::{ToolApprovalPolicy, ToolRiskLevel};
 
@@ -184,6 +185,25 @@ impl ToolRegistry {
                 }),
             },
             ToolDefinition {
+                name: "create_directory_in_selected_directory".into(),
+                description: "Create one new child directory at the root of a directory explicitly selected by the user. Existing entries are never replaced. This always requires user approval.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "referenceId": {
+                            "type": "string",
+                            "description": "The opaque referenceId of the selected directory."
+                        },
+                        "directoryName": {
+                            "type": "string",
+                            "description": "A plain directory name without path separators."
+                        }
+                    },
+                    "required": ["referenceId", "directoryName"],
+                    "additionalProperties": false
+                }),
+            },
+            ToolDefinition {
                 name: "get_directory_entry_metadata".into(),
                 description: "Get size, modification time, entry type, and file extension for an entry returned by list_selected_directory or search_selected_directory.".into(),
                 input_schema: directory_entry_input_schema(),
@@ -257,6 +277,9 @@ impl ToolRegistry {
             "create_text_file_in_selected_directory" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
+            "create_directory_in_selected_directory" => {
+                Ok((RiskLevel::Write, ApprovalPolicy::Always))
+            }
             "open_directory_entry" | "reveal_directory_entry" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
@@ -291,6 +314,9 @@ impl ToolRegistry {
             "get_directory_entry_metadata" => self.directory_entry_metadata(arguments).await,
             "create_text_file_in_selected_directory" => {
                 self.create_text_file_in_selected_directory(arguments).await
+            }
+            "create_directory_in_selected_directory" => {
+                self.create_directory_in_selected_directory(arguments).await
             }
             "open_directory_entry" => self.directory_entry_action(name, arguments, false).await,
             "reveal_directory_entry" => self.directory_entry_action(name, arguments, true).await,
@@ -367,6 +393,18 @@ impl ToolRegistry {
             "create_text_file_in_selected_directory" => {
                 let arguments = parse_create_text_file_arguments(name, arguments)?;
                 validate_created_text_file(&arguments.file_name, &arguments.content)?;
+                if self
+                    .authorized_directories
+                    .contains_key(&arguments.reference_id)
+                {
+                    Ok(())
+                } else {
+                    Err(crate::files::FileError::ReferenceInvalid.into())
+                }
+            }
+            "create_directory_in_selected_directory" => {
+                let arguments = parse_create_directory_arguments(name, arguments)?;
+                validate_created_directory(&arguments.directory_name)?;
                 if self
                     .authorized_directories
                     .contains_key(&arguments.reference_id)
@@ -513,6 +551,29 @@ impl ToolRegistry {
         }))
     }
 
+    async fn create_directory_in_selected_directory(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let arguments =
+            parse_create_directory_arguments("create_directory_in_selected_directory", arguments)?;
+        validate_created_directory(&arguments.directory_name)?;
+        let directory = self
+            .authorized_directories
+            .get(&arguments.reference_id)
+            .ok_or(crate::files::FileError::ReferenceInvalid)?;
+        let metadata = directory
+            .create_directory(&arguments.directory_name)
+            .await?;
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "targetReferenceId": metadata.target_reference_id,
+            "createdDirectoryName": metadata.name,
+            "relativePath": metadata.relative_path,
+            "created": true
+        }))
+    }
+
     async fn directory_entry_action(
         &self,
         name: &str,
@@ -615,6 +676,23 @@ struct CreateTextFileArguments {
     reference_id: String,
     file_name: String,
     content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateDirectoryArguments {
+    reference_id: String,
+    directory_name: String,
+}
+
+fn parse_create_directory_arguments(
+    name: &str,
+    arguments: &Value,
+) -> Result<CreateDirectoryArguments, RuntimeError> {
+    serde_json::from_value(arguments.clone()).map_err(|error| RuntimeError::InvalidToolArguments {
+        name: name.into(),
+        message: error.to_string(),
+    })
 }
 
 fn parse_create_text_file_arguments(
