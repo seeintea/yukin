@@ -40,9 +40,15 @@ pub async fn imported_skill_set_enabled(
     state: State<'_, AppState>,
     request: SetEnabledRequest,
 ) -> AppResult<ImportedSkill> {
-    imported_skill::set_enabled(state.db(), &request.id, request.enabled)
+    let skill = imported_skill::set_enabled(state.db(), &request.id, request.enabled)
         .await
-        .log_error("imported_skill_set_enabled")
+        .log_error("imported_skill_set_enabled")?;
+    tracing::info!(
+        skill_id = %skill.id,
+        enabled = skill.enabled,
+        "imported skill state updated"
+    );
+    Ok(skill)
 }
 
 #[tauri::command]

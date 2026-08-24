@@ -29,6 +29,15 @@ pub enum SourceKind {
     Command,
 }
 
+impl SourceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bundle => "bundle",
+            Self::Command => "command",
+        }
+    }
+}
+
 impl TryFrom<String> for SourceKind {
     type Error = String;
 

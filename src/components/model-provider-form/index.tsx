@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 import { modelProviderPresetList } from "#/api/model-provider";
@@ -69,7 +69,8 @@ export function ModelProviderForm(props: ModelProviderFormProps) {
     },
   });
 
-  const selectedPreset = findPreset(presets, form.watch("providerKey"));
+  const selectedProviderKey = useWatch({ control: form.control, name: "providerKey" });
+  const selectedPreset = findPreset(presets, selectedProviderKey);
   const providerItems = presets.map((preset) => ({
     label: preset.displayName,
     value: preset.providerKey,

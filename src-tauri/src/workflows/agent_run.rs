@@ -603,8 +603,22 @@ async fn execute_stream(
                         authorization = ExecutionAuthorization::Approved {
                             arguments_digest: digest,
                         };
+                        tracing::info!(
+                            conversation_id = %prepared.conversation_id,
+                            run_id = %prepared.response.run_id,
+                            tool_call_id = %tool_call.id,
+                            tool_name = %tool_call.function.name,
+                            "tool call approved"
+                        );
                     }
                     Ok(Ok(ToolCallDecision::Reject)) => {
+                        tracing::info!(
+                            conversation_id = %prepared.conversation_id,
+                            run_id = %prepared.response.run_id,
+                            tool_call_id = %tool_call.id,
+                            tool_name = %tool_call.function.name,
+                            "tool call rejected"
+                        );
                         emitter.emit(EventKind::ToolCallRejected {
                             tool_call_id: tool_call.id.clone(),
                         });
@@ -702,13 +716,24 @@ async fn execute_stream(
                 tool_call_id: tool_call.id.clone(),
                 result: result_summary,
             });
-            tracing::debug!(
-                conversation_id = %prepared.conversation_id,
-                run_id = %prepared.response.run_id,
-                tool_call_id = %tool_call.id,
-                tool_name = %tool_call.function.name,
-                "tool call completed"
-            );
+            if approval_policy == ApprovalPolicy::Always {
+                tracing::info!(
+                    conversation_id = %prepared.conversation_id,
+                    run_id = %prepared.response.run_id,
+                    tool_call_id = %tool_call.id,
+                    tool_name = %tool_call.function.name,
+                    risk_level = risk_level.as_str(),
+                    "approved tool call completed"
+                );
+            } else {
+                tracing::debug!(
+                    conversation_id = %prepared.conversation_id,
+                    run_id = %prepared.response.run_id,
+                    tool_call_id = %tool_call.id,
+                    tool_name = %tool_call.function.name,
+                    "tool call completed"
+                );
+            }
             messages.push(Message::tool(tool_call.id, result_json));
         }
     }

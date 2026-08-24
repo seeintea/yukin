@@ -24,6 +24,15 @@ enum ImportKind {
     Directory,
 }
 
+impl ImportKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Archive => "archive",
+            Self::Directory => "directory",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Manifest {
     manifest_version: String,
@@ -129,6 +138,7 @@ async fn import(
     source: PathBuf,
     import_kind: ImportKind,
 ) -> AppResult<McpServer> {
+    let import_kind_label = import_kind.as_str();
     let id = Uuid::now_v7().to_string();
     let base = app.path().app_data_dir()?.join("mcp-servers");
     let staging = base.join(format!(".import-{id}"));
@@ -207,7 +217,16 @@ async fn import(
     if result.is_err() {
         let _ = fs::remove_dir_all(destination);
     }
-    result
+    let server = result?;
+    tracing::info!(
+        mcp_server_id = %server.id,
+        mcp_server_name = %server.name,
+        import_kind = import_kind_label,
+        source_kind = server.source_kind.as_str(),
+        server_type = server.server_type.as_str(),
+        "MCP server package stored"
+    );
+    Ok(server)
 }
 
 fn prepare_package(staging: &Path) -> AppResult<PreparedPackage> {
@@ -341,6 +360,7 @@ pub async fn delete(app: AppHandle, pool: &SqlitePool, id: &str) -> AppResult<()
             }
         }
     }
+    tracing::info!(mcp_server_id = %id, "MCP server deleted");
     Ok(())
 }
 

@@ -40,9 +40,15 @@ pub async fn mcp_server_set_enabled(
     state: State<'_, AppState>,
     request: SetEnabledRequest,
 ) -> AppResult<McpServer> {
-    mcp_server::set_enabled(state.db(), &request.id, request.enabled)
+    let server = mcp_server::set_enabled(state.db(), &request.id, request.enabled)
         .await
-        .log_error("mcp_server_set_enabled")
+        .log_error("mcp_server_set_enabled")?;
+    tracing::info!(
+        mcp_server_id = %server.id,
+        enabled = server.enabled,
+        "MCP server state updated"
+    );
+    Ok(server)
 }
 
 #[tauri::command]

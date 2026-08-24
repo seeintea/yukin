@@ -82,13 +82,21 @@ async fn import(
     if result.is_err() {
         let _ = fs::remove_dir_all(destination);
     }
-    result
+    let skill = result?;
+    tracing::info!(
+        skill_id = %skill.id,
+        skill_name = %skill.name,
+        source_kind = skill.source_kind.as_str(),
+        "imported skill stored"
+    );
+    Ok(skill)
 }
 
 pub async fn delete(app: AppHandle, pool: &SqlitePool, id: &str) -> AppResult<()> {
     let managed_path = PathBuf::from(imported_skill::managed_path(pool, id).await?);
     imported_skill::delete(pool, id).await?;
     remove_managed_directory(&app, "skills", managed_path);
+    tracing::info!(skill_id = %id, "imported skill deleted");
     Ok(())
 }
 

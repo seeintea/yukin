@@ -76,6 +76,7 @@ function ChatConversation({ conversationId }: Pick<ChatProps, "conversationId">)
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (messages.length === 0) return;
     bottomRef.current?.scrollIntoView({ behavior: isSending ? "smooth" : "auto" });
   }, [isSending, messages]);
 
