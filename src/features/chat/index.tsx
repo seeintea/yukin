@@ -197,6 +197,7 @@ function ToolCallCard({
             create_directory_in_selected_directory: "创建目录",
             copy_directory_entry: "复制文件或目录",
             move_directory_entry: "移动或重命名",
+            trash_directory_entry: "移入系统回收站",
           }[toolCall.name] ?? toolCall.name}
         </CardTitle>
         <span className="text-xs text-muted-foreground">{status}</span>
@@ -225,6 +226,8 @@ function ToolCallCard({
           <CopyDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : toolCall.name === "move_directory_entry" ? (
           <MoveDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
+        ) : toolCall.name === "trash_directory_entry" ? (
+          <TrashDirectoryEntryResult argumentsValue={toolCall.arguments} value={toolCall.result} />
         ) : (
           <>
             <ToolCallValue label="参数" value={toolCall.arguments} />
@@ -256,7 +259,9 @@ function ToolCallCard({
                           ? "允许复制"
                           : toolCall.name === "move_directory_entry"
                             ? "允许移动"
-                            : "允许"}
+                            : toolCall.name === "trash_directory_entry"
+                              ? "允许移入回收站"
+                              : "允许"}
             </Button>
           </div>
         )}
@@ -691,6 +696,44 @@ function MoveDirectoryEntryResult({
   );
 }
 
+function TrashDirectoryEntryResult({
+  argumentsValue,
+  value,
+}: {
+  argumentsValue: unknown;
+  value: unknown;
+}) {
+  const argumentsObject =
+    argumentsValue && typeof argumentsValue === "object"
+      ? (argumentsValue as { relativePath?: unknown })
+      : {};
+  const result =
+    value && typeof value === "object"
+      ? (value as {
+          directoryName?: unknown;
+          relativePath?: unknown;
+          kind?: unknown;
+        })
+      : null;
+  const relativePath = String(result?.relativePath ?? argumentsObject.relativePath ?? "已授权条目");
+
+  if (!result) {
+    return (
+      <div className="space-y-1">
+        <p>将 {relativePath} 移入系统回收站</p>
+        <p className="text-muted-foreground">不会永久删除；完成后可通过系统回收站恢复。</p>
+      </div>
+    );
+  }
+
+  return (
+    <p>
+      {typeof result.directoryName === "string" ? result.directoryName + " · " : ""}
+      已将 {relativePath} 移入系统回收站
+    </p>
+  );
+}
+
 function FileReadResult({ value }: { value: unknown }) {
   if (!value || typeof value !== "object") {
     return <p className="text-muted-foreground">正在读取已授权附件…</p>;
@@ -732,6 +775,7 @@ function formatToolError(code: string | null, fallback: string) {
       file_copy_into_source: "不能把目录复制到自身或其子目录中。",
       file_move_destination_invalid: "新名称无效；请输入不含路径分隔符的普通名称。",
       file_move_into_source: "不能把目录移动到自身或其子目录中。",
+      file_trash: "无法将该条目移入系统回收站；请检查系统权限或稍后重试。",
     }[code ?? ""] ?? fallback
   );
 }

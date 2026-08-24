@@ -523,6 +523,43 @@ impl AuthorizedDirectory {
         })
     }
 
+    pub(crate) async fn trash_entry(
+        &self,
+        source_reference_id: &str,
+    ) -> Result<DirectoryTrashResult, FileError> {
+        self.trash_entry_with(source_reference_id, |path| {
+            trash::delete(path).map_err(|_| FileError::Trash)
+        })
+        .await
+    }
+
+    async fn trash_entry_with<F>(
+        &self,
+        source_reference_id: &str,
+        trash_action: F,
+    ) -> Result<DirectoryTrashResult, FileError>
+    where
+        F: FnOnce(PathBuf) -> Result<(), FileError> + Send + 'static,
+    {
+        self.validate_root().await?;
+        let source = self.entry(source_reference_id)?;
+        let (source_path, source_metadata) = source.resolve().await?;
+        let kind = if source_metadata.is_dir() {
+            DirectorySearchKind::Directory
+        } else {
+            DirectorySearchKind::File
+        };
+        tauri::async_runtime::spawn_blocking(move || trash_action(source_path))
+            .await
+            .map_err(|_| FileError::Trash)??;
+        self.invalidate_entry_tree(&source.relative_path);
+        Ok(DirectoryTrashResult {
+            name: source.name,
+            relative_path: source.relative_path,
+            kind,
+        })
+    }
+
     fn invalidate_entry_tree(&self, relative_path: &str) {
         let relative_path = Path::new(relative_path);
         self.entries
@@ -835,6 +872,13 @@ pub(crate) struct DirectoryCopyResult {
 pub(crate) struct DirectoryMoveResult {
     pub(crate) previous_relative_path: String,
     pub(crate) metadata: DirectoryEntryMetadata,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct DirectoryTrashResult {
+    pub(crate) name: String,
+    pub(crate) relative_path: String,
+    pub(crate) kind: DirectorySearchKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1171,6 +1215,8 @@ pub enum FileError {
     MoveDestinationInvalid,
     #[error("a directory cannot be moved into itself or one of its descendants")]
     MoveIntoSource,
+    #[error("moving the entry to the system trash failed")]
+    Trash,
     #[error("selected path must be a regular file")]
     NotRegularFile,
     #[error("selected path must be a directory")]
@@ -1214,6 +1260,7 @@ impl FileError {
             Self::CopyIntoSource => "file_copy_into_source",
             Self::MoveDestinationInvalid => "file_move_destination_invalid",
             Self::MoveIntoSource => "file_move_into_source",
+            Self::Trash => "file_trash",
             Self::NotRegularFile => "file_not_regular",
             Self::NotDirectory => "directory_not_found",
             Self::DirectoryScopeTooBroad => "directory_scope_too_broad",
@@ -1885,6 +1932,98 @@ mod tests {
                 .await,
             Err(FileError::MoveDestinationInvalid)
         );
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn trashes_an_entry_and_invalidates_its_reference_tree() {
+        let path = test_path("trash-entry");
+        tokio::fs::create_dir_all(path.join("source/nested"))
+            .await
+            .expect("create source tree");
+        tokio::fs::write(path.join("source/nested/report.txt"), "report")
+            .await
+            .expect("write nested file");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+        let listing = directory.list().await.expect("list root");
+        let source_reference = listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == "source")
+            .and_then(|entry| entry.target_reference_id.as_deref())
+            .expect("source reference");
+        let search = directory
+            .search("report", DirectorySearchKind::File)
+            .await
+            .expect("search nested file");
+        let nested_file_reference = &search.entries[0].target_reference_id;
+        let fake_trash_path = path.join("fake-trash");
+
+        let result = directory
+            .trash_entry_with(source_reference, {
+                let fake_trash_path = fake_trash_path.clone();
+                move |source_path| {
+                    std::fs::rename(source_path, fake_trash_path).map_err(FileError::from)
+                }
+            })
+            .await
+            .expect("trash directory");
+        assert_eq!(result.name, "source");
+        assert_eq!(result.relative_path, "source");
+        assert_eq!(result.kind, DirectorySearchKind::Directory);
+        assert!(!path.join("source").exists());
+        assert!(fake_trash_path.join("nested/report.txt").is_file());
+        assert_eq!(
+            directory.entry_metadata(source_reference).await,
+            Err(FileError::EntryReferenceInvalid)
+        );
+        assert_eq!(
+            directory.entry_metadata(nested_file_reference).await,
+            Err(FileError::EntryReferenceInvalid)
+        );
+
+        tokio::fs::remove_dir_all(path)
+            .await
+            .expect("remove directory");
+    }
+
+    #[tokio::test]
+    async fn keeps_the_entry_authorized_when_trashing_fails() {
+        let path = test_path("trash-failure");
+        tokio::fs::create_dir_all(&path)
+            .await
+            .expect("create directory");
+        tokio::fs::write(path.join("source.txt"), "source")
+            .await
+            .expect("write source");
+        let directories = SelectedDirectories::default();
+        let reference = directories
+            .register(path.clone())
+            .await
+            .expect("register directory");
+        let directory = directories.take(&reference).expect("take directory");
+        let listing = directory.list().await.expect("list root");
+        let source_reference = listing.entries[0]
+            .target_reference_id
+            .as_deref()
+            .expect("source reference");
+
+        assert_eq!(
+            directory
+                .trash_entry_with(source_reference, |_| { Err(FileError::Trash) })
+                .await,
+            Err(FileError::Trash)
+        );
+        assert!(path.join("source.txt").is_file());
+        assert!(directory.entry_metadata(source_reference).await.is_ok());
 
         tokio::fs::remove_dir_all(path)
             .await

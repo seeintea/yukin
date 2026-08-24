@@ -145,6 +145,18 @@ fn rejects_a_directory_reference_that_was_not_attached_to_the_run() {
             crate::files::FileError::ReferenceInvalid
         ))
     );
+    assert_eq!(
+        ToolRegistry::built_in(PathBuf::new()).validate(
+            "trash_directory_entry",
+            &json!({
+                "targetReferenceId": "not-authorized",
+                "relativePath": "source.txt"
+            }),
+        ),
+        Err(RuntimeError::File(
+            crate::files::FileError::EntryReferenceInvalid
+        ))
+    );
 }
 
 #[test]
@@ -572,6 +584,49 @@ async fn moves_a_referenced_entry_only_after_approval() {
             .expect("read moved file"),
         "move content"
     );
+
+    tokio::fs::remove_dir_all(path)
+        .await
+        .expect("remove selected directory");
+}
+
+#[tokio::test]
+async fn refuses_to_trash_a_referenced_entry_without_approval() {
+    let path = std::env::temp_dir().join(format!(
+        "yukin-trash-entry-tool-test-{}",
+        uuid::Uuid::now_v7()
+    ));
+    tokio::fs::create_dir_all(&path)
+        .await
+        .expect("create selected directory");
+    tokio::fs::write(path.join("source.txt"), "trash content")
+        .await
+        .expect("write source");
+    let directories = SelectedDirectories::default();
+    let reference = directories
+        .register(path.clone())
+        .await
+        .expect("register directory");
+    let directory = directories.take(&reference).expect("take reference");
+    let listing = directory.list().await.expect("list directory");
+    let source = &listing.entries[0];
+    let arguments = json!({
+        "targetReferenceId": source.target_reference_id,
+        "relativePath": "source.txt"
+    });
+    let registry = ToolRegistry::with_authorizations(PathBuf::new(), Vec::new(), vec![directory]);
+
+    assert!(matches!(
+        registry
+            .execute(
+                "trash_directory_entry",
+                &arguments,
+                ExecutionAuthorization::NotRequired,
+            )
+            .await,
+        Err(RuntimeError::InvalidToolApproval(_))
+    ));
+    assert!(path.join("source.txt").is_file());
 
     tokio::fs::remove_dir_all(path)
         .await

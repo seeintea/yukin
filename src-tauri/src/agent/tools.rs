@@ -274,6 +274,11 @@ impl ToolRegistry {
                 }),
             },
             ToolDefinition {
+                name: "trash_directory_entry".into(),
+                description: "Move one previously listed or searched file or directory to the operating system trash or recycle bin. This never permanently deletes the entry and always requires user approval.".into(),
+                input_schema: directory_entry_input_schema(),
+            },
+            ToolDefinition {
                 name: "get_directory_entry_metadata".into(),
                 description: "Get size, modification time, entry type, and file extension for an entry returned by list_selected_directory or search_selected_directory.".into(),
                 input_schema: directory_entry_input_schema(),
@@ -352,6 +357,7 @@ impl ToolRegistry {
             }
             "copy_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "move_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
+            "trash_directory_entry" => Ok((RiskLevel::Write, ApprovalPolicy::Always)),
             "open_directory_entry" | "reveal_directory_entry" => {
                 Ok((RiskLevel::Write, ApprovalPolicy::Always))
             }
@@ -392,6 +398,7 @@ impl ToolRegistry {
             }
             "copy_directory_entry" => self.copy_directory_entry(arguments).await,
             "move_directory_entry" => self.move_directory_entry(arguments).await,
+            "trash_directory_entry" => self.trash_directory_entry(arguments).await,
             "open_directory_entry" => self.directory_entry_action(name, arguments, false).await,
             "reveal_directory_entry" => self.directory_entry_action(name, arguments, true).await,
             _ => Err(RuntimeError::ToolNotFound(name.into())),
@@ -460,7 +467,10 @@ impl ToolRegistry {
                     Err(crate::files::FileError::ReferenceInvalid.into())
                 }
             }
-            "get_directory_entry_metadata" | "open_directory_entry" | "reveal_directory_entry" => {
+            "get_directory_entry_metadata"
+            | "open_directory_entry"
+            | "reveal_directory_entry"
+            | "trash_directory_entry" => {
                 let arguments = parse_directory_entry_arguments(name, arguments)?;
                 self.directory_for_entry(&arguments).map(|_| ())
             }
@@ -754,6 +764,21 @@ impl ToolRegistry {
             "kind": result.metadata.kind.as_str(),
             "size": result.metadata.size,
             "moved": true
+        }))
+    }
+
+    async fn trash_directory_entry(&self, arguments: &Value) -> Result<Value, RuntimeError> {
+        let arguments = parse_directory_entry_arguments("trash_directory_entry", arguments)?;
+        let directory = self.directory_for_entry(&arguments)?;
+        let result = directory
+            .trash_entry(&arguments.target_reference_id)
+            .await?;
+        Ok(json!({
+            "directoryName": directory.reference().name,
+            "name": result.name,
+            "relativePath": result.relative_path,
+            "kind": result.kind.as_str(),
+            "trashed": true
         }))
     }
 
